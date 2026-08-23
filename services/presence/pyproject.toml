@@ -1,0 +1,14 @@
+[project]
+name = "presence"
+version = "0.1.0"
+description = "OpenMarket v2 — Presence & Notifications (Python FastAPI)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "sqlalchemy[asyncio]",
+    "asyncpg",
+    "redis",
+    "aiokafka",
+    "pydantic",
+]

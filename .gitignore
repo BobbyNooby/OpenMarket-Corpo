@@ -1,0 +1,58 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Go
+bin/
+*.exe
+vendor/
+
+# Java (Maven/Gradle)
+target/
+build/
+.gradle/
+.mvn/
+*.class
+*.jar
+hs_err_pid*
+
+# C# / .NET
+bin/
+obj/
+*.user
+*.suo
+packages/
+*.nupkg
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.venv/
+venv/
+.eggs/
+
+# Node / TypeScript
+node_modules/
+.svelte-kit/
+build/
+
+# Docker
+uploads/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jaeger / Prometheus / Grafana data
+deploy/compose/grafana-data/
+deploy/compose/prometheus-data/

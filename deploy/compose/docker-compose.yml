@@ -1,0 +1,199 @@
+# openmarket-corpo — Docker Compose
+# One command: make infra-up (infra only) or docker compose up --build (everything)
+# Gateway port 3000 is the ONLY public entry point.
+
+services:
+  # ─────────────────────────── INFRA ───────────────────────────
+
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: om
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword123}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init/01-create-dbs.sql:/docker-entrypoint-initdb.d/01-create-dbs.sql:ro
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U om"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [internal]
+
+  kafka:
+    image: apache/kafka:3.7
+    environment:
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [internal]
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP
+    networks: [internal]
+
+  # ─────────────────────────── SERVICES ───────────────────────────
+
+  gateway:
+    build:
+      context: ../../services/gateway
+      dockerfile: Dockerfile
+    ports: ["3000:3000"]
+    environment:
+      AUTH_URL: http://auth:8080
+      CATALOGUE_URL: http://catalogue:8080
+      MESSAGING_URL: http://messaging:8080
+      PRESENCE_URL: http://presence:8080
+      ASSETS_URL: http://assets:8080
+      ADMIN_URL: http://admin:8080
+      REDIS_URL: redis:6379
+      OTLP_ENDPOINT: http://jaeger:4318
+    depends_on:
+      redis: { condition: service_healthy }
+    networks: [internal]
+
+  auth:
+    build:
+      context: ../../services/auth
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgres://om:${POSTGRES_PASSWORD:-devpassword123}@postgres:5432/auth_db
+      KAFKA_BROKERS: kafka:9092
+      OTLP_ENDPOINT: http://jaeger:4318
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  catalogue:
+    build:
+      context: ../../services/catalogue
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgres://om:${POSTGRES_PASSWORD:-devpassword123}@postgres:5432/catalogue_db
+      KAFKA_BROKERS: kafka:9092
+      OTLP_ENDPOINT: http://jaeger:4318
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  messaging:
+    build:
+      context: ../../services/messaging
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgres://om:${POSTGRES_PASSWORD:-devpassword123}@postgres:5432/messaging_db
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis:6379
+      OTLP_ENDPOINT: http://jaeger:4318
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  presence:
+    build:
+      context: ../../services/presence
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgres://om:${POSTGRES_PASSWORD:-devpassword123}@postgres:5432/notif_db
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      OTLP_ENDPOINT: http://jaeger:4318
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  assets:
+    build:
+      context: ../../services/assets
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgres://om:${POSTGRES_PASSWORD:-devpassword123}@postgres:5432/asset_db
+      OTLP_ENDPOINT: http://jaeger:4318
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes: [uploads:/app/uploads]
+    networks: [internal]
+
+  admin:
+    build:
+      context: ../../services/admin
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgres://om:${POSTGRES_PASSWORD:-devpassword123}@postgres:5432/admin_db
+      KAFKA_BROKERS: kafka:9092
+      OTLP_ENDPOINT: http://jaeger:4318
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+volumes:
+  pgdata:
+  uploads:
+
+networks:
+  internal:
+    driver: bridge
