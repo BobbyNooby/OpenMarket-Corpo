@@ -3,6 +3,9 @@
 .env.local
 .env.*.local
 
+# Project memory (never committed)
+log.md
+
 # Go
 bin/
 *.exe
