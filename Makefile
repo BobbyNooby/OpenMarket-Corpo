@@ -1,12 +1,28 @@
-.PHONY: infra-up build up down clean test lint
+.PHONY: infra-up build up down clean test lint \
+       postgres auth catalogue messaging presence assets admin gateway \
+       infra-down
 
 COMPOSE := docker compose -f deploy/compose/docker-compose.yml
+
+# ─────────────────────── INFRA ───────────────────────
 
 infra-up:
 	$(COMPOSE) up -d postgres kafka redis jaeger
 	@echo "Waiting for infra to be healthy..."
 	$(COMPOSE) up -d postgres kafka redis jaeger --wait
 	@echo "Infra ready."
+
+infra-down:
+	$(COMPOSE) down
+
+# Just postgres for local dev
+postgres:
+	$(COMPOSE) up -d postgres
+	@echo "Waiting for postgres..."
+	$(COMPOSE) up -d postgres --wait
+	@echo "Postgres ready on localhost:5432"
+
+# ─────────────────────── DOCKER (all services) ───────────────────────
 
 build:
 	$(COMPOSE) build
@@ -20,6 +36,33 @@ down:
 clean:
 	$(COMPOSE) down -v --remove-orphans
 	@echo "Volumes removed. Run 'make infra-up' to start fresh."
+
+# ─────────────────────── LOCAL DEV (individual services) ───────────────────────
+# Run from repo root: make auth, make gateway, etc.
+# Each starts a service locally (not in Docker).
+
+auth:
+	cd services/auth && mvn spring-boot:run
+
+admin:
+	cd services/admin && mvn spring-boot:run
+
+catalogue:
+	cd services/catalogue && dotnet run
+
+gateway:
+	cd services/gateway && go run .
+
+messaging:
+	cd services/messaging && go run .
+
+presence:
+	cd services/presence && uvicorn main:app --reload --port 8080
+
+assets:
+	cd services/assets && uvicorn main:app --reload --port 8080
+
+# ─────────────────────── TEST / LINT ───────────────────────
 
 test:
 	@echo "=== Go tests (gateway + messaging) ==="
