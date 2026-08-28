@@ -1,0 +1,9 @@
+{
+  "lsp": {
+    "jdtls": {
+      "settings": {
+        "java_home": "/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home"
+      }
+    }
+  }
+}
