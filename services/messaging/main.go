@@ -59,6 +59,6 @@ func main() {
 		})
 	})
 
-	port := envOrDefault("PORT", "8080")
+	port := envOrDefault("PORT", "8082")
 	http.ListenAndServe(":"+port, nil)
 }

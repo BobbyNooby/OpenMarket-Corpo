@@ -2,7 +2,7 @@
 
 The **messaging** service owns conversations and chat between OpenMarket users.
 
-- **Stack:** Go (net/http), port 8080
+- **Stack:** Go (net/http), port 8082
 - **Database:** PostgreSQL (`messaging_db`)
 - **Cache / Pub-Sub:** Redis (typing indicators, unread tracking, per-conversation WS fan-out)
 
@@ -31,9 +31,9 @@ make messaging
 Verify:
 
 ```bash
-curl http://localhost:8080/
-curl http://localhost:8080/health/live
-curl http://localhost:8080/health/ready
+curl http://localhost:8082/
+curl http://localhost:8082/health/live
+curl http://localhost:8082/health/ready
 ```
 
 Requires `DATABASE_URL` (defaults to `messaging_db`).
