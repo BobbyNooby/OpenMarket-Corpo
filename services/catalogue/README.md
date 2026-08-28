@@ -3,7 +3,7 @@
 The **catalogue** service owns the marketplace catalog: items, currencies,
 categories, listings, offers, and trades.
 
-- **Stack:** C# / ASP.NET Core (.NET 8), port 8080
+- **Stack:** C# / ASP.NET Core (.NET 10), port 8081
 - **Database:** PostgreSQL (`catalogue_db`)
 
 ## Current state
@@ -31,9 +31,9 @@ make catalogue
 Verify:
 
 ```bash
-curl http://localhost:8080/
-curl http://localhost:8080/health/live
-curl http://localhost:8080/health/ready
+curl http://localhost:8081/
+curl http://localhost:8081/health/live
+curl http://localhost:8081/health/ready
 ```
 
 Requires `DATABASE_URL` (defaults to `catalogue_db`).
