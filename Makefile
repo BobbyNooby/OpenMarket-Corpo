@@ -57,10 +57,10 @@ messaging:
 	cd services/messaging && go run .
 
 presence:
-	cd services/presence && uvicorn main:app --reload --port 8080
+	cd services/presence && uvicorn main:app --reload --port 8083
 
 assets:
-	cd services/assets && uvicorn main:app --reload --port 8080
+	cd services/assets && uvicorn main:app --reload --port 8084
 
 # ─────────────────────── TEST / LINT ───────────────────────
 

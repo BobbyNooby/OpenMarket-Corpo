@@ -68,11 +68,11 @@ services:
     ports: ["3000:3000"]
     environment:
       AUTH_URL: http://auth:8080
-      CATALOGUE_URL: http://catalogue:8080
-      MESSAGING_URL: http://messaging:8080
-      PRESENCE_URL: http://presence:8080
-      ASSETS_URL: http://assets:8080
-      ADMIN_URL: http://admin:8080
+      CATALOGUE_URL: http://catalogue:8081
+      MESSAGING_URL: http://messaging:8082
+      PRESENCE_URL: http://presence:8083
+      ASSETS_URL: http://assets:8084
+      ADMIN_URL: http://admin:8085
       REDIS_URL: redis:6379
       OTLP_ENDPOINT: http://jaeger:4318
     depends_on:
@@ -109,7 +109,7 @@ services:
       postgres: { condition: service_healthy }
       kafka: { condition: service_healthy }
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8080/health/ready"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8081/health/ready"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -129,7 +129,7 @@ services:
       kafka: { condition: service_healthy }
       redis: { condition: service_healthy }
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8080/health/ready"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8082/health/ready"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -149,7 +149,7 @@ services:
       kafka: { condition: service_healthy }
       redis: { condition: service_healthy }
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health/ready')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8083/health/ready')"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -165,7 +165,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health/ready')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8084/health/ready')"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -184,7 +184,7 @@ services:
       postgres: { condition: service_healthy }
       kafka: { condition: service_healthy }
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8080/health/ready"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health/ready"]
       interval: 10s
       timeout: 5s
       retries: 5

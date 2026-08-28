@@ -160,7 +160,7 @@ Run a single service locally (see `DEV.md` for details):
 make postgres
 make auth          # Spring Boot on :8080
 make gateway       # Go on :3000
-make presence      # Python FastAPI on :8080
+make presence      # Python FastAPI on :8083
 ```
 
 ## Repo layout

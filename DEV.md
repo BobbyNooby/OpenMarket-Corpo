@@ -16,9 +16,13 @@
 make postgres
 
 # 2. Run a service locally (pick one)
-make auth          # Spring Boot on :8080
 make gateway       # Go on :3000
-make presence      # Python on :8080
+make auth          # Spring Boot on :8080
+make catalogue     # C# on :8081
+make messaging     # Go on :8082
+make presence      # Python FastAPI on :8083
+make assets        # Python FastAPI on :8084
+make admin         # Spring Boot on :8085
 ```
 
 ## Architecture
@@ -35,9 +39,14 @@ make presence      # Python on :8080
          │ localhost:5432
     ┌────┴─────────────────────────────────┐
     │         Local Services                │
-    │  auth :8080  gateway :3000  etc.      │
+    │  gateway:3000  auth:8080  cat:8081    │
+    │  msg:8082  presence:8083  assets:8084 │
+    │  admin:8085                           │
     └──────────────────────────────────────┘
 ```
+
+Each service listens on its own port so you can run several at once while
+testing. The Go gateway's default fallback URLs already point at these ports.
 
 ## Common Env Vars
 
@@ -128,7 +137,7 @@ make presence
 # or: cd services/presence && uvicorn main:app --reload
 
 # Test it
-curl http://localhost:8080/
+curl http://localhost:8083/
 ```
 
 ## Database Access
