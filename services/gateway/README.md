@@ -36,4 +36,6 @@ curl http://localhost:3000/health/system
 ```
 
 Other services are located via env vars (`AUTH_URL`, `CATALOGUE_URL`, etc.)
-with localhost fallbacks.
+with localhost fallbacks on distinct ports:
+`auth:8080`, `catalogue:8081`, `messaging:8082`, `presence:8083`,
+`assets:8084`, `admin:8085`.
