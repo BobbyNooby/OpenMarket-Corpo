@@ -2,17 +2,21 @@ spring:
   application:
     name: auth
   datasource:
-    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/auth_db
-    username: ${POSTGRES_USER:om}
-    password: ${POSTGRES_PASSWORD:devpassword123}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
       ddl-auto: validate
+      default_schema: auth
     open-in-view: false
   flyway:
     enabled: true
+    schemas: auth
+    create-schemas: true
     locations: classpath:db/migration
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:1025}
+    from: ${MAIL_FROM:OpenMarket <no-reply@openmarket.dev>}
 
 management:
   endpoints:
@@ -25,3 +29,35 @@ management:
 
 server:
   port: 8080
+
+jwt:
+  issuer: auth
+  audience: openmarket
+  access-ttl-minutes: 15
+  refresh-ttl-days: 7
+  key-path: ${JWT_KEY_PATH:keys/jwt-rsa.jwk}
+
+auth:
+  # Set AUTH_COOKIE_SECURE=true wherever HTTPS terminates (staging/prod)
+  cookie-secure: ${AUTH_COOKIE_SECURE:false}
+  # Frontend base URL used in emailed links
+  app-url: ${APP_URL:http://localhost:3000}
+  verification:
+    email-verify-hours: 24
+    password-reset-minutes: 60
+
+discord:
+  client-id: ${DISCORD_CLIENT_ID:}
+  client-secret: ${DISCORD_CLIENT_SECRET:}
+  # Browser lands on the GATEWAY (only public entry), which proxies to auth
+  redirect-uri: ${DISCORD_REDIRECT_URI:http://localhost:3000/api/v1/auth/discord/callback}
+  authorize-url: ${DISCORD_AUTHORIZE_URL:https://discord.com/oauth2/authorize}
+  token-url: ${DISCORD_TOKEN_URL:https://discord.com/api/oauth2/token}
+  users-me-url: ${DISCORD_USERS_ME_URL:https://discord.com/api/users/@me}
+  scopes: ${DISCORD_SCOPES:identify email}
+  success-redirect: ${OAUTH_SUCCESS_REDIRECT:http://localhost:3000/auth/success}
+  failure-redirect: ${OAUTH_FAILURE_REDIRECT:http://localhost:3000/auth/failure}
+
+springdoc:
+  swagger-ui:
+    path: /docs
