@@ -1,5 +1,6 @@
 package dev.bob.openmarket.auth.auth;
 
+import dev.bob.openmarket.auth.common.ClientIpResolver;
 import dev.bob.openmarket.auth.common.ConflictException;
 import dev.bob.openmarket.auth.common.UnauthorizedException;
 import dev.bob.openmarket.auth.config.SecurityConfig;
@@ -47,6 +48,7 @@ class AuthControllerContractTest {
 
     @MockBean AuthService authService;
     @MockBean UserService userService;
+    @MockBean ClientIpResolver clientIps; // IP metadata is not under contract here
 
     private static final String REGISTER_JSON =
         "{\"email\":\"garen@demaciabook.com\",\"password\":\"demaciaforever222\",\"name\":\"Garen Crownguard\"}";

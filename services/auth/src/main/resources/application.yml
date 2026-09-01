@@ -40,6 +40,9 @@ jwt:
 auth:
   # Set AUTH_COOKIE_SECURE=true wherever HTTPS terminates (staging/prod)
   cookie-secure: ${AUTH_COOKIE_SECURE:false}
+  # Comma-separated proxy IPs/CIDRs whose X-Forwarded-For we trust.
+  # Empty = trust nobody (remoteAddr is always the client IP).
+  trusted-proxy-ip: ${AUTH_TRUSTED_PROXY_IP:}
   # Frontend base URL used in emailed links
   app-url: ${APP_URL:http://localhost:3000}
   verification:

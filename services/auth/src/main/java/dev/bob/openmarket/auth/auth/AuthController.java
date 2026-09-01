@@ -3,6 +3,7 @@ package dev.bob.openmarket.auth.auth;
 import dev.bob.openmarket.auth.auth.dto.AuthResponse;
 import dev.bob.openmarket.auth.auth.dto.LoginRequest;
 import dev.bob.openmarket.auth.auth.dto.RegisterRequest;
+import dev.bob.openmarket.auth.common.ClientIpResolver;
 import dev.bob.openmarket.auth.token.AuthResult;
 import dev.bob.openmarket.auth.token.TokenCookieService;
 import dev.bob.openmarket.auth.user.dto.UserResponse;
@@ -31,11 +32,14 @@ public class AuthController {
     private final AuthService authService;
     private final UserService userService;
     private final TokenCookieService cookies;
+    private final ClientIpResolver clientIps;
 
-    public AuthController(AuthService authService, UserService userService, TokenCookieService cookies) {
+    public AuthController(AuthService authService, UserService userService, TokenCookieService cookies,
+                          ClientIpResolver clientIps) {
         this.authService = authService;
         this.userService = userService;
         this.cookies = cookies;
+        this.clientIps = clientIps;
     }
 
     @PostMapping("/register")
@@ -77,10 +81,7 @@ public class AuthController {
         return http.getHeader("User-Agent");
     }
 
-    private static String ip(HttpServletRequest http) {
-        String forwarded = http.getHeader("X-Forwarded-For");
-        return forwarded != null && !forwarded.isBlank()
-            ? forwarded.split(",")[0].trim()
-            : http.getRemoteAddr();
+    private String ip(HttpServletRequest http) {
+        return clientIps.resolve(http);
     }
 }

@@ -1,5 +1,6 @@
 package dev.bob.openmarket.auth.auth;
 
+import dev.bob.openmarket.auth.common.ClientIpResolver;
 import dev.bob.openmarket.auth.common.RateLimitException;
 import dev.bob.openmarket.auth.config.SecurityConfig;
 import dev.bob.openmarket.auth.support.TestSecurityConfig;
@@ -34,6 +35,7 @@ class EmailFlowControllerContractTest {
     @Autowired MockMvc mvc;
 
     @MockBean EmailFlowService emailFlows;
+    @MockBean ClientIpResolver clientIps; // IP metadata is not under contract here
 
     private static final String AUTH = "Authorization";
 

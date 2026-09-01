@@ -4,6 +4,7 @@ import dev.bob.openmarket.auth.auth.dto.EmailChangeRequest;
 import dev.bob.openmarket.auth.auth.dto.ForgotPasswordRequest;
 import dev.bob.openmarket.auth.auth.dto.ResetPasswordRequest;
 import dev.bob.openmarket.auth.auth.dto.VerifyEmailRequest;
+import dev.bob.openmarket.auth.common.ClientIpResolver;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -30,9 +31,11 @@ import java.util.UUID;
 public class EmailFlowController {
 
     private final EmailFlowService emailFlows;
+    private final ClientIpResolver clientIps;
 
-    public EmailFlowController(EmailFlowService emailFlows) {
+    public EmailFlowController(EmailFlowService emailFlows, ClientIpResolver clientIps) {
         this.emailFlows = emailFlows;
+        this.clientIps = clientIps;
     }
 
     @PostMapping("/verify-email/resend")
@@ -72,10 +75,7 @@ public class EmailFlowController {
         emailFlows.resetPassword(request.token(), request.newPassword());
     }
 
-    private static String ip(HttpServletRequest http) {
-        String forwarded = http.getHeader("X-Forwarded-For");
-        return forwarded != null && !forwarded.isBlank()
-            ? forwarded.split(",")[0].trim()
-            : http.getRemoteAddr();
+    private String ip(HttpServletRequest http) {
+        return clientIps.resolve(http);
     }
 }
