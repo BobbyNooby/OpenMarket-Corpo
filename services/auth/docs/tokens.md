@@ -19,7 +19,7 @@ cookie theft.
 | Token | Type | Transport | Lifetime | Storage |
 |---|---|---|---|---|
 | Access | RS256 JWT | `om_access` httpOnly cookie (or `Authorization` header) | 15 min (`jwt.access-ttl-minutes`) | nowhere — stateless |
-| Refresh | opaque 256-bit random | `om_refresh` httpOnly cookie (`path=/api/v1/auth`) | 7 days (`jwt.refresh-ttl-days`) | **SHA-256 hash only**, in `auth.refresh_tokens` |
+| Refresh | opaque 256-bit random | `om_refresh` httpOnly cookie (`path=/api/v1/auth`) | 7 days per family, absolute (`jwt.refresh-ttl-days`) | **SHA-256 hash only**, in `auth.refresh_tokens` |
 
 Why this split:
 
@@ -60,10 +60,21 @@ Every login starts a **family** (`family_id`, a uuid). Rules:
 
 1. `refresh` consumes the presented token (`revoked_at = now`) and issues
    the successor **in the same family**. Only the newest member works.
-2. Presenting an **already-consumed** token means someone is replaying a
+2. The consume is an **atomic conditional update** —
+   `UPDATE … SET revoked_at = now WHERE id = ? AND revoked_at IS NULL` — and
+   the code branches on the row count. Of two concurrent refreshes exactly
+   one wins; the loser sees the token as already consumed and takes rule 3.
+   UX consequence: two tabs racing a refresh may log the user out
+   everywhere.
+3. Presenting an **already-consumed** token means someone is replaying a
    stolen cookie → the **entire family is revoked** and the client must log
    in again.
-3. `logout` revokes just the presented token.
+4. The successor **inherits the family's original expiry** — a family dies
+   7 days after login no matter how often it rotated (absolute window, not a
+   sliding one). Only a fresh login buys a fresh 7 days.
+5. `logout` revokes just the presented token (also a conditional update),
+   and "log out everywhere" is a single bulk `UPDATE` — so revocation beats
+   a concurrent rotation in both orderings.
 
 Implementation notes (two bugs the smoke test caught — both worth knowing):
 

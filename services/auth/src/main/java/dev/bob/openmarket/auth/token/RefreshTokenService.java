@@ -32,6 +32,8 @@ import java.util.UUID;
  *       succeed and fork the family; the loser is treated exactly like a replay</li>
  *   <li>presenting an already-consumed token is treated as theft evidence:
  *       the whole family is revoked and the client must log in again</li>
+ *   <li>the successor inherits the family's original expiry — a family lives
+ *       7 days from login no matter how often it rotates (absolute, not sliding)</li>
  * </ul>
  */
 @Service
@@ -63,13 +65,14 @@ public class RefreshTokenService {
     /** Creates the first token of a new family (login / register). Returns the raw value. */
     @Transactional
     public String issue(UUID userId, String userAgent, String ip) {
-        return createAndSave(userId, UUID.randomUUID(), null, userAgent, ip).rawToken();
+        Instant expiresAt = Instant.now().plusSeconds(props.getRefreshTtlDays() * 24 * 60 * 60);
+        return createAndSave(userId, UUID.randomUUID(), null, userAgent, ip, expiresAt).rawToken();
     }
 
     /**
-     * Consumes {@code rawToken} and returns the successor token (same family)
-     * plus its stored entity. Throws if the token is unknown, expired, or
-     * already consumed. The consume itself is an
+     * Consumes {@code rawToken} and returns the successor token — same family,
+     * inheriting its absolute expiry — plus the stored entity. Throws if the
+     * token is unknown, expired, or already consumed. The consume itself is an
      * atomic conditional UPDATE, so of two concurrent refreshes exactly one
      * proceeds; the loser takes the reuse (theft) path.
      */
@@ -100,7 +103,7 @@ public class RefreshTokenService {
         token.setRevokedAt(now);
 
         Issued issued = createAndSave(token.getUserId(), token.getFamilyId(), token.getId(),
-            token.getUserAgent(), token.getIpAddress());
+            token.getUserAgent(), token.getIpAddress(), token.getExpiresAt());
         return new Rotated(issued.entity(), issued.rawToken());
     }
 
@@ -197,7 +200,8 @@ public class RefreshTokenService {
             .orElseThrow(() -> new UnauthorizedException("invalid_refresh_token", "Unknown refresh token"));
     }
 
-    private Issued createAndSave(UUID userId, UUID familyId, UUID rotatedFrom, String userAgent, String ip) {
+    private Issued createAndSave(UUID userId, UUID familyId, UUID rotatedFrom,
+                                 String userAgent, String ip, Instant expiresAt) {
         String raw = newTokenValue();
 
         RefreshToken token = new RefreshToken();
@@ -207,7 +211,7 @@ public class RefreshTokenService {
         token.setTokenHash(hash(raw));
         token.setUserAgent(userAgent);
         token.setIpAddress(ip);
-        token.setExpiresAt(Instant.now().plusSeconds(props.getRefreshTtlDays() * 24 * 60 * 60));
+        token.setExpiresAt(expiresAt);
         RefreshToken saved = repository.save(token);
 
         return new Issued(saved, raw);

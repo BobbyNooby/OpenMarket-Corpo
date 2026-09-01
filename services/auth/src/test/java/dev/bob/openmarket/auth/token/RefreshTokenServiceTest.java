@@ -98,6 +98,7 @@ class RefreshTokenServiceTest {
         assertThat(rotated.entity().getFamilyId()).isEqualTo(FAMILY); // same family
         assertThat(rotated.entity().getRotatedFromId()).isEqualTo(old.getId());
         assertThat(rotated.entity().getTokenHash()).isNotEqualTo(old.getTokenHash());
+        assertThat(rotated.entity().getExpiresAt()).isEqualTo(old.getExpiresAt());  // family window inherited
         assertThat(rotated.entity().getUserAgent()).isEqualTo("LeagueClient/24.0"); // device inherited
         assertThat(rotated.rawToken()).isNotBlank();
     }
