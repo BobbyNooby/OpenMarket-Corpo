@@ -66,4 +66,40 @@ class RateLimiterTest {
         }
         assertThat(allowed.get()).isGreaterThanOrEqualTo(2);
     }
+
+    @Test
+    void sweep_evicts_buckets_whose_window_has_fully_elapsed() throws InterruptedException {
+        RateLimiter limiter = new RateLimiter();
+        limiter.allow("forgot", "long-lived", 5, Duration.ofHours(1));    // still inside its window
+        limiter.allow("forgot", "short-lived", 5, Duration.ofSeconds(1)); // elapses below
+
+        Thread.sleep(1100);
+        limiter.evictElapsedWindows();
+
+        assertThat(limiter.trackedKeyCount()).isEqualTo(1);
+    }
+
+    @Test
+    void sweep_keeps_buckets_still_inside_their_window() {
+        RateLimiter limiter = new RateLimiter();
+        limiter.allow("forgot", "k", 5, Duration.ofHours(1));
+
+        limiter.evictElapsedWindows();
+
+        assertThat(limiter.trackedKeyCount()).isEqualTo(1);
+    }
+
+    @Test
+    void size_cap_evicts_oldest_buckets_on_insert() {
+        RateLimiter limiter = new RateLimiter(2);
+        limiter.allow("forgot", "a", 100, Duration.ofHours(1));
+        limiter.allow("forgot", "b", 100, Duration.ofHours(1));
+        limiter.allow("forgot", "c", 100, Duration.ofHours(1)); // third insert crosses the cap
+
+        assertThat(limiter.trackedKeyCount()).isLessThanOrEqualTo(2);
+
+        // a's counter was evicted with the flood, so its fresh bucket passes again
+        assertThatCode(() -> limiter.allow("forgot", "a", 1, Duration.ofHours(1)))
+            .doesNotThrowAnyException();
+    }
 }
