@@ -151,6 +151,20 @@ class UserServiceTest {
     }
 
     @Test
+    void update_username_conflict_throws_field_error() {
+        when(users.findByIdAndDeletedAtIsNull(TestUsers.USER_ID)).thenReturn(Optional.of(user()));
+        when(profiles.findById(TestUsers.USER_ID)).thenReturn(Optional.of(profile()));
+        when(profiles.existsByUsername("someoneelse")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.update(TestUsers.USER_ID,
+            new UpdateMeRequest(null, "someoneelse", null, null, null, null, null, null)))
+            .isInstanceOfSatisfying(ConflictException.class, e -> {
+                assertThat(e.code()).isEqualTo("username_taken");
+                assertThat(e.field()).isEqualTo("username");
+            });
+    }
+
+    @Test
     void update_username_unique_race_surfaces_as_username_taken() {
         // check-then-save race: the pre-check passes but the unique index
         // fires at flush — must surface as the same 409, not a 500
