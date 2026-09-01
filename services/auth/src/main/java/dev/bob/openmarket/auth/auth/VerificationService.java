@@ -62,7 +62,8 @@ public class VerificationService {
     /**
      * Consumes a raw token of any of the expected types. Throws
      * `invalid_token` / `token_expired`; on success the row is marked used
-     * (single-use).
+     * (single-use — the mark is an atomic conditional update, so a
+     * double-submission race produces exactly one winner).
      */
     @Transactional
     public VerificationToken consume(String raw, String... expectedTypes) {
@@ -80,7 +81,16 @@ public class VerificationService {
         if (expectedTypes.length > 0 && !List.of(expectedTypes).contains(token.getType())) {
             throw new UnauthorizedException("invalid_token", "Token is not valid for this action");
         }
-        token.setUsedAt(Instant.now());
+        // The checks above are fast paths — the real single-use guarantee is
+        // this atomic consume. The bulk UPDATE bypasses the persistence
+        // context, so mirror usedAt onto the managed entity: the caller sees
+        // the row as used, and flush rewrites the identical value instead of
+        // a stale null.
+        Instant now = Instant.now();
+        if (repository.consume(token.getId(), now) == 0) {
+            throw new UnauthorizedException("invalid_token", "Unknown or already used token");
+        }
+        token.setUsedAt(now);
         return token;
     }
 
