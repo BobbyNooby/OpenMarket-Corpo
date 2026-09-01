@@ -40,18 +40,32 @@ Build order and what's deliberately deferred.
   `user.banned` / `user.deleted` / `user.unbanned` written to the outbox
   (Kafka relay still deferred — the gateway's Redis blocklist consumes
   these once wired).
+- [x] **Phase F — security audit remediation** (2026-09)
+  Full audit + OWASP-grounded pass, then fixes in 5 waves: ban bypass via
+  Discord OAuth, per-account login throttling (uniform 401), atomic
+  refresh-token consume + absolute 7-day family window, admin guard rails
+  (self/owner/rank rules) + `audit_log` table, token supersede, SMTP-fail
+  enumeration fix, provider tokens never persisted, GDPR erase completed,
+  72-byte password boundary, rate-limiter bounding, OAuth-state key
+  domain separation, cleanup job, non-root container + persisted signing
+  key. See [security.md](security.md) for mitigated vs still-open.
 
 ## Deliberately deferred
 
 | Item | Why / when it arrives |
 |---|---|
+| MFA (TOTP / passkeys) | auth service L2 feature; needs schema (`mfa_secrets`), enrollment + challenge flows — next major auth phase |
+| Sensitive-op re-auth (password/step-up for role change, delete, OAuth link) | needs a short-lived "re-auth" grace claim or fresh-password check endpoint |
+| Password blocklist (breached/common) | needs k-anonymity HIBP client or local top-100k set; policy hook (`@PasswordBytes`) already in place |
+| CSRF/Origin checks on cookie-borne mutations | currently mitigated by SameSite=Lax + gateway-only exposure; revisit if cookies ever accepted cross-site or from other origins |
+| Testcontainers concurrency tests (double-refresh race, ban-vs-refresh) | unit pins exist; true race coverage lands with the platform fast-follow |
+| Owner-transfer flow | last-owner protection exists (409); explicit transfer UX is a product decision |
+| `listSessions` pagination | fine at current scale; noted in security.md |
 | Testcontainers integration tests (transaction semantics, migrations) | partially covered by `scripts/flow-test.sh`; finer-grained cases land with the platform fast-follow |
 | Kafka outbox relay + `user.created` / `user.deleted` events | events phase; `outbox_events` table already exists |
 | `profile_reviews` / `users_activity` wiring | tables exist (v1 mapping); features come with trust-score / presence work |
 | gRPC internal API | gateway→service sync calls migrate from HTTP later |
 | Gateway JWT validation + cookie forwarding | separate gateway work; blocks real end-to-end, not auth itself |
-| Expired refresh-token cleanup job | see [security.md](security.md#known-gaps--future-work) |
-| Login attempt rate limiting / lockout | gateway-side limiting first; `rate_limited` machinery already in place |
 
 ---
 
