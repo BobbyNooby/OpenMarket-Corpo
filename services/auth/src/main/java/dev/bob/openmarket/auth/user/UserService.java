@@ -4,21 +4,25 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.bob.openmarket.auth.common.ConflictException;
 import dev.bob.openmarket.auth.common.NotFoundException;
+import dev.bob.openmarket.auth.domain.OutboxEvent;
 import dev.bob.openmarket.auth.domain.User;
 import dev.bob.openmarket.auth.domain.UserProfile;
 import dev.bob.openmarket.auth.repository.CredentialRepository;
 import dev.bob.openmarket.auth.repository.OAuthAccountRepository;
+import dev.bob.openmarket.auth.repository.OutboxEventRepository;
 import dev.bob.openmarket.auth.repository.UserProfileRepository;
 import dev.bob.openmarket.auth.repository.UserRepository;
 import dev.bob.openmarket.auth.repository.UserRoleRepository;
 import dev.bob.openmarket.auth.token.RefreshTokenService;
 import dev.bob.openmarket.auth.user.dto.MeResponse;
 import dev.bob.openmarket.auth.user.dto.UpdateMeRequest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -36,6 +40,7 @@ public class UserService {
     private final CredentialRepository credentials;
     private final OAuthAccountRepository oauthAccounts;
     private final UserRoleRepository userRoles;
+    private final OutboxEventRepository outbox;
     private final RefreshTokenService refreshTokens;
     private final ObjectMapper mapper;
 
@@ -44,6 +49,7 @@ public class UserService {
                        CredentialRepository credentials,
                        OAuthAccountRepository oauthAccounts,
                        UserRoleRepository userRoles,
+                       OutboxEventRepository outbox,
                        RefreshTokenService refreshTokens,
                        ObjectMapper mapper) {
         this.users = users;
@@ -51,6 +57,7 @@ public class UserService {
         this.credentials = credentials;
         this.oauthAccounts = oauthAccounts;
         this.userRoles = userRoles;
+        this.outbox = outbox;
         this.refreshTokens = refreshTokens;
         this.mapper = mapper;
     }
@@ -105,6 +112,14 @@ public class UserService {
                 throw new ConflictException("username_taken", "This username is already taken", "username");
             }
             profile.setUsername(req.username());
+            // same check-then-save race as register: a concurrent signup can
+            // claim the name between existsByUsername and commit — the unique
+            // index is the referee, so flush now to surface it as a 409
+            try {
+                profiles.saveAndFlush(profile);
+            } catch (DataIntegrityViolationException e) {
+                throw new ConflictException("username_taken", "This username is already taken", "username");
+            }
         }
         if (req.bio() != null) {
             profile.setBio(req.bio());
@@ -131,13 +146,17 @@ public class UserService {
     /**
      * Soft delete: the row stays (other services may still reference the id;
      * hard erasure happens via the GDPR saga later) but the account can no
-     * longer log in and all its refresh tokens die immediately.
+     * longer log in and all its refresh tokens die immediately. The email is
+     * rewritten to a tombstone so `existsByEmail` (which counts soft-deleted
+     * rows) frees the address for re-registration.
      */
     @Transactional
     public void delete(UUID userId) {
         User user = getById(userId);
+        user.setEmail("deleted-" + user.getId().toString().substring(0, 8) + "@deleted.invalid");
         user.setDeletedAt(Instant.now());
         refreshTokens.revokeAllForUser(userId);
+        emit("user", userId, "user.deleted", Map.of("userId", userId.toString(), "erased", false));
     }
 
     private UserProfile profileOf(UUID userId) {
@@ -161,6 +180,23 @@ public class UserService {
             return mapper.writeValueAsString(value);
         } catch (Exception e) {
             throw new IllegalStateException("Could not serialize profile JSON", e);
+        }
+    }
+
+    private void emit(String aggregateType, UUID aggregateId, String topic, Map<String, Object> payload) {
+        OutboxEvent event = new OutboxEvent();
+        event.setAggregateType(aggregateType);
+        event.setAggregateId(aggregateId);
+        event.setTopic(topic);
+        event.setPayload(toJson(payload));
+        outbox.save(event);
+    }
+
+    private String toJson(Object value) {
+        try {
+            return mapper.writeValueAsString(value);
+        } catch (Exception e) {
+            throw new IllegalStateException("Could not serialize outbox payload", e);
         }
     }
 }
