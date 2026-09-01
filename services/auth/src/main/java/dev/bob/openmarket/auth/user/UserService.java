@@ -155,6 +155,10 @@ public class UserService {
         User user = getById(userId);
         user.setEmail("deleted-" + user.getId().toString().substring(0, 8) + "@deleted.invalid");
         user.setDeletedAt(Instant.now());
+        // Free OAuth bindings too, or the Discord id stays welded to this dead
+        // row forever: the callback would 401 account_deleted and a fresh
+        // signup would hit provider_already_linked (mirrors admin erase).
+        oauthAccounts.deleteByUserId(userId);
         refreshTokens.revokeAllForUser(userId);
         emit("user", userId, "user.deleted", Map.of("userId", userId.toString(), "erased", false));
     }

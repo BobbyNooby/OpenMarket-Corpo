@@ -193,6 +193,7 @@ class UserServiceTest {
         // tombstone frees the address: existsByEmail("garen@demaciabook.com")
         // no longer matches, so re-registration succeeds
         assertThat(u.getEmail()).isEqualTo("deleted-11111111@deleted.invalid");
+        verify(oauthAccounts).deleteByUserId(TestUsers.USER_ID); // Discord id freed for re-signup
         verify(refreshTokens).revokeAllForUser(TestUsers.USER_ID);
         var c = ArgumentCaptor.forClass(OutboxEvent.class);
         verify(outbox).save(c.capture());
