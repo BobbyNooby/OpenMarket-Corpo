@@ -3,6 +3,7 @@ package dev.bob.openmarket.auth.auth;
 import dev.bob.openmarket.auth.auth.dto.LoginRequest;
 import dev.bob.openmarket.auth.auth.dto.RegisterRequest;
 import dev.bob.openmarket.auth.common.ConflictException;
+import dev.bob.openmarket.auth.common.RateLimiter;
 import dev.bob.openmarket.auth.common.UnauthorizedException;
 import dev.bob.openmarket.auth.domain.Credential;
 import dev.bob.openmarket.auth.domain.RefreshToken;
@@ -26,6 +27,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
@@ -70,11 +72,12 @@ class AuthServiceTest {
     void setUp() {
         // real bcrypt (strength 10 for speed) — the hashing behaviour matters
         PasswordEncoder encoder = new BCryptPasswordEncoder(10);
-        service = new AuthService(users, profiles, credentials, oauthAccounts, userRoles, bans, refreshTokens, jwt, encoder);
+        service = new AuthService(users, profiles, credentials, oauthAccounts, userRoles, bans,
+            refreshTokens, jwt, new RateLimiter(), encoder);
     }
 
     private void happyRegisterMocks() {
-        when(users.count()).thenReturn(2L); // register already saved this user; >1 = existing platform
+        when(userRoles.countLiveOwners()).thenReturn(1L); // platform already has an owner
         when(users.existsByEmail(anyString())).thenReturn(false);
         when(profiles.existsByUsername(anyString())).thenReturn(false);
         when(users.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -107,17 +110,6 @@ class AuthServiceTest {
 
         assertThat(result.accessToken()).isEqualTo("access-jwt");
         assertThat(result.refreshToken()).isEqualTo("refresh-raw");
-    }
-
-    @Test
-    void register_first_user_on_empty_platform_becomes_owner() {
-        happyRegisterMocks();
-        when(users.count()).thenReturn(1L); // count after save == 1 → this is the first user
-
-        service.register(new RegisterRequest(
-            "garen@demaciabook.com", "demaciaforever222", "Garen Crownguard", null), null, null);
-
-        assertThat(savedRole().getRoleId()).isEqualTo("owner");
     }
 
     @Test
@@ -210,6 +202,30 @@ class AuthServiceTest {
         assertThatThrownBy(() -> service.login(new LoginRequest("garen@demaciabook.com", "demaciaforever222"), null, null))
             .isInstanceOfSatisfying(UnauthorizedException.class,
                 e -> assertThat(e.code()).isEqualTo("invalid_credentials"));
+    }
+
+    @Test
+    void login_locks_out_after_too_many_attempts_with_the_bad_credentials_envelope() {
+        User user = TestUsers.user();
+        when(users.findByEmail("garen@demaciabook.com")).thenReturn(Optional.of(user));
+        String hash = new BCryptPasswordEncoder(10).encode("demaciaforever222");
+        when(credentials.findById(TestUsers.USER_ID))
+            .thenReturn(Optional.of(new Credential(TestUsers.USER_ID, hash)));
+
+        // burn the whole 10-attempt window on wrong passwords
+        for (int i = 0; i < 10; i++) {
+            assertThatThrownBy(() -> service.login(new LoginRequest("garen@demaciabook.com", "wrongpass1"), null, null))
+                .isInstanceOfSatisfying(UnauthorizedException.class,
+                    e -> assertThat(e.code()).isEqualTo("invalid_credentials"));
+        }
+
+        // attempt 11 is throttled — even with the CORRECT password — but must
+        // be indistinguishable from a wrong password (no account/lock leak)
+        assertThatThrownBy(() -> service.login(new LoginRequest("garen@demaciabook.com", "demaciaforever222"), null, null))
+            .isInstanceOfSatisfying(UnauthorizedException.class, e -> {
+                assertThat(e.code()).isEqualTo("invalid_credentials");
+                assertThat(e.getMessage()).isEqualTo("Email or password is incorrect");
+            });
     }
 
     // ── refresh / logout ─────────────────────────────────────

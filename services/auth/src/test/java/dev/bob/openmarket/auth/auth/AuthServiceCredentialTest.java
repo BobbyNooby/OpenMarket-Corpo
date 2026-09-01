@@ -60,7 +60,8 @@ class AuthServiceCredentialTest {
 
     @BeforeEach
     void setUp() {
-        service = new AuthService(users, profiles, credentials, oauthAccounts, userRoles, bans,            refreshTokens, jwt, new BCryptPasswordEncoder(10));
+        service = new AuthService(users, profiles, credentials, oauthAccounts, userRoles, bans,
+            refreshTokens, jwt, new dev.bob.openmarket.auth.common.RateLimiter(), new BCryptPasswordEncoder(10));
         when(credentials.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 

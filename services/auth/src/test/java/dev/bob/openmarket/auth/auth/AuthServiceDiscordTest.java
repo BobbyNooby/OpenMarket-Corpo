@@ -1,6 +1,7 @@
 package dev.bob.openmarket.auth.auth;
 
 import dev.bob.openmarket.auth.common.ConflictException;
+import dev.bob.openmarket.auth.common.RateLimiter;
 import dev.bob.openmarket.auth.common.ForbiddenException;
 import dev.bob.openmarket.auth.common.NotFoundException;
 import dev.bob.openmarket.auth.common.UnauthorizedException;
@@ -67,7 +68,8 @@ class AuthServiceDiscordTest {
 
     @BeforeEach
     void setUp() {
-        service = new AuthService(users, profiles, credentials, oauthAccounts, userRoles, bans,            refreshTokens, jwt, new BCryptPasswordEncoder(10));
+        service = new AuthService(users, profiles, credentials, oauthAccounts, userRoles, bans,
+            refreshTokens, jwt, new RateLimiter(), new BCryptPasswordEncoder(10));
         when(users.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(profiles.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(oauthAccounts.save(any())).thenAnswer(inv -> inv.getArgument(0));

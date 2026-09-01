@@ -5,6 +5,8 @@ import dev.bob.openmarket.auth.auth.dto.RegisterRequest;
 import dev.bob.openmarket.auth.common.ConflictException;
 import dev.bob.openmarket.auth.common.ForbiddenException;
 import dev.bob.openmarket.auth.common.NotFoundException;
+import dev.bob.openmarket.auth.common.RateLimiter;
+import dev.bob.openmarket.auth.common.RateLimitException;
 import dev.bob.openmarket.auth.common.UnauthorizedException;
 import dev.bob.openmarket.auth.domain.Ban;
 import dev.bob.openmarket.auth.domain.Credential;
@@ -28,6 +30,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -39,6 +42,9 @@ public class AuthService {
     private static final String DUMMY_HASH = "$2a$12$Xu9fbIeitcFyMfeQDLl9Bu0FXDfgnidmgRPIeN9xEyq5TrLLx2KSi";
     private static final String DEFAULT_ROLE = "user";
     public static final String PROVIDER_DISCORD = "discord";
+    /** Login throttle: 10 attempts per 15-minute fixed window, keyed by email. */
+    private static final int LOGIN_ATTEMPTS_LIMIT = 10;
+    private static final Duration LOGIN_ATTEMPTS_WINDOW = Duration.ofMinutes(15);
 
     private final UserRepository users;
     private final UserProfileRepository profiles;
@@ -48,6 +54,7 @@ public class AuthService {
     private final BanRepository bans;
     private final RefreshTokenService refreshTokens;
     private final JwtService jwt;
+    private final RateLimiter rateLimiter;
     private final PasswordEncoder passwordEncoder;
 
     public AuthService(UserRepository users,
@@ -58,6 +65,7 @@ public class AuthService {
                        BanRepository bans,
                        RefreshTokenService refreshTokens,
                        JwtService jwt,
+                       RateLimiter rateLimiter,
                        PasswordEncoder passwordEncoder) {
         this.users = users;
         this.profiles = profiles;
@@ -67,6 +75,7 @@ public class AuthService {
         this.bans = bans;
         this.refreshTokens = refreshTokens;
         this.jwt = jwt;
+        this.rateLimiter = rateLimiter;
         this.passwordEncoder = passwordEncoder;
     }
 
@@ -108,6 +117,16 @@ public class AuthService {
     @Transactional
     public AuthResult login(LoginRequest req, String userAgent, String ip) {
         String email = req.email().trim().toLowerCase();
+
+        // Per-account throttle before any password work: 10 attempts / 15 min
+        // per lowercased email, fixed window (never reset on success). Hitting
+        // the limit throws the SAME 401 as bad credentials — a distinct
+        // "locked" response would leak which emails exist or are locked.
+        try {
+            rateLimiter.allow("login", email, LOGIN_ATTEMPTS_LIMIT, LOGIN_ATTEMPTS_WINDOW);
+        } catch (RateLimitException ignored) {
+            throw new UnauthorizedException("invalid_credentials", "Email or password is incorrect");
+        }
 
         User user = users.findByEmail(email).filter(u -> u.getDeletedAt() == null).orElse(null);
         Credential credential = user != null ? credentials.findById(user.getId()).orElse(null) : null;
