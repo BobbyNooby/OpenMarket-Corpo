@@ -114,6 +114,7 @@ class AuthServiceDiscordTest {
         when(oauthAccounts.findByProviderAndProviderAccountId("discord", DISCORD_ID))
             .thenReturn(Optional.empty());
         User user = TestUsers.user();
+        user.setEmailVerified(true); // already verified — linking must not write anything
         when(users.findByEmail("garen@demaciabook.com")).thenReturn(Optional.of(user));
 
         var result = service.discordLoginOrSignup(
@@ -122,7 +123,38 @@ class AuthServiceDiscordTest {
         assertThat(result.user()).isSameAs(user);
         var saved = capturedAccount();
         assertThat(saved.getUserId()).isEqualTo(TestUsers.USER_ID); // linked to EXISTING user
+        // zero user writes: no duplicate identity, and the emailVerified flip
+        // (users.save) only happens for locally-unverified accounts — covered
+        // by autolink_marks_a_locally_unverified_email_as_verified below
         verify(users, never()).save(any());
+    }
+
+    @Test
+    void autolink_marks_a_locally_unverified_email_as_verified() {
+        when(oauthAccounts.findByProviderAndProviderAccountId("discord", DISCORD_ID))
+            .thenReturn(Optional.empty());
+        User user = TestUsers.user(); // emailVerified = false locally
+        when(users.findByEmail("garen@demaciabook.com")).thenReturn(Optional.of(user));
+
+        service.discordLoginOrSignup(discordUser("garen@demaciabook.com", true), "at", null, null);
+
+        verify(users).save(user); // flag change must be persisted
+        assertThat(user.isEmailVerified()).isTrue(); // Discord's inbox proof
+        var saved = capturedAccount();
+        assertThat(saved.getProviderAccountId()).isEqualTo(DISCORD_ID);
+    }
+
+    @Test
+    void autolink_leaves_an_already_verified_email_alone() {
+        when(oauthAccounts.findByProviderAndProviderAccountId("discord", DISCORD_ID))
+            .thenReturn(Optional.empty());
+        User user = TestUsers.user();
+        user.setEmailVerified(true);
+        when(users.findByEmail("garen@demaciabook.com")).thenReturn(Optional.of(user));
+
+        service.discordLoginOrSignup(discordUser("garen@demaciabook.com", true), "at", null, null);
+
+        verify(users, never()).save(any()); // no pointless write
     }
 
     @Test
