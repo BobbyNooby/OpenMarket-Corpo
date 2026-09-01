@@ -31,6 +31,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -165,18 +166,6 @@ class EmailFlowServiceTest {
     // ── change email ─────────────────────────────────────────
 
     @Test
-    void verifyEmail_with_garbage_token_is_401_invalid_token() {
-        when(verifications.consume(anyString(), any(), any()))
-            .thenThrow(new UnauthorizedException("invalid_token", "Unknown or already used token"));
-
-        assertThatThrownBy(() -> service.verifyEmail("nope"))
-            .isInstanceOfSatisfying(UnauthorizedException.class,
-                e -> assertThat(e.code()).isEqualTo("invalid_token"));
-    }
-
-    // ── change email ─────────────────────────────────────────
-
-    @Test
     void emailChange_sends_confirmation_to_the_new_address() {
         stubUser(true);
         when(users.existsByEmail("lux2@demaciabook.com")).thenReturn(false);
@@ -222,6 +211,25 @@ class EmailFlowServiceTest {
 
         verify(email).send(eq("garen@demaciabook.com"), contains("reset"),
             contains("/reset-password?token=reset-token"));
+    }
+
+    @Test
+    void forgotPassword_send_failure_is_swallowed_to_stay_enumeration_safe() {
+        when(users.findByEmail("garen@demaciabook.com"))
+            .thenReturn(Optional.of(user(true)));
+        when(verifications.issue(TestUsers.USER_ID, VerificationService.TYPE_PASSWORD_RESET,
+            "garen@demaciabook.com")).thenReturn("reset-token");
+        doThrow(new IllegalStateException("Email delivery failed"))
+            .when(email).send(anyString(), anyString(), anyString());
+
+        // the always-204 contract wins: a dead relay must not behave
+        // differently for real vs. fake addresses
+        assertThatCode(() -> service.forgotPassword("garen@demaciabook.com", "1.2.3.4"))
+            .doesNotThrowAnyException();
+
+        // issuance happened before the send — the token is out and consumable
+        verify(verifications).issue(TestUsers.USER_ID, VerificationService.TYPE_PASSWORD_RESET,
+            "garen@demaciabook.com");
     }
 
     @Test

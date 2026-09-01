@@ -10,6 +10,8 @@ import dev.bob.openmarket.auth.mail.EmailDispatcher;
 import dev.bob.openmarket.auth.repository.CredentialRepository;
 import dev.bob.openmarket.auth.repository.UserRepository;
 import dev.bob.openmarket.auth.token.RefreshTokenService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -25,6 +27,8 @@ import java.util.UUID;
  */
 @Service
 public class EmailFlowService {
+
+    private static final Logger log = LoggerFactory.getLogger(EmailFlowService.class);
 
     private final UserRepository users;
     private final CredentialRepository credentials;
@@ -137,10 +141,19 @@ public class EmailFlowService {
 
         users.findByEmail(emailAddr).filter(u -> u.getDeletedAt() == null).ifPresent(user -> {
             String raw = verifications.issue(user.getId(), VerificationService.TYPE_PASSWORD_RESET, user.getEmail());
-            email.send(user.getEmail(), "OpenMarket — reset your password",
-                "Reset your password (valid 60 minutes):\n" + appUrl
-                    + "/reset-password?token=" + raw
-                    + "\n\nIf you didn't request this, ignore this message.");
+            try {
+                email.send(user.getEmail(), "OpenMarket — reset your password",
+                    "Reset your password (valid 60 minutes):\n" + appUrl
+                        + "/reset-password?token=" + raw
+                        + "\n\nIf you didn't request this, ignore this message.");
+            } catch (Exception e) {
+                // a dead relay must not turn known addresses into 500s while
+                // unknown ones get 204 — that difference is an enumeration
+                // oracle. The always-204 contract wins; delivery problems
+                // surface in the logs/metrics instead.
+                log.warn("forgot-password mail delivery failed to {}: {}",
+                    user.getEmail(), e.getMessage());
+            }
         });
     }
 
