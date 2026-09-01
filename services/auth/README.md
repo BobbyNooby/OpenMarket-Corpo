@@ -1,126 +1,73 @@
 # auth — Auth & Users
 
 The **auth** microservice owns identity for OpenMarket: user registration,
-authentication, token lifecycle, and profile management.
+authentication, token lifecycle, and profile management. It is the only
+service that knows what a password or a Discord account is — every other
+service just consumes JWTs.
 
-- **Stack:** Java 21, Spring Boot 3.3.4, Maven
-- **Database:** PostgreSQL (`auth_db`)
-- **Cache / Tokens:** Redis (refresh tokens, rate limits)
-- **Messaging:** Kafka (user lifecycle events)
+- **Stack:** Java 21, Spring Boot 3.3.4, Maven, Spring Security (resource server)
+- **Database:** PostgreSQL `auth_db`, schema `auth` (Flyway migrations)
 - **Port:** 8080
+- **Status:** **Phases A–E done** — schema, password auth, RS256 JWT with
+  rotation + theft detection, session/device management, profile CRUD,
+  Discord OAuth + account linking, email flows (verify / change / reset
+  with rate limiting), and RBAC moderation (ban / warn / roles / erase,
+  owner ⊃ admin ⊃ moderator) — pinned by **140 tests** plus the live
+  **flow test** (`scripts/flow-test.sh`, 108 assertions through a fake
+  Discord API and the dev mail log).
 
-## Current state
-
-- Spring Boot app boots and connects to Postgres via HikariCP.
-- `/` returns service info and pings the database (`SELECT version()`).
-- Flyway is wired up and ready for migrations.
-
-## What this service will do
-
-- Register and authenticate users
-- Issue short-lived JWT access tokens + opaque refresh tokens
-- Validate JWTs (public key published for the gateway)
-- Rotate and revoke refresh tokens
-- Manage user profiles and account status
-- Publish user lifecycle events to Kafka
-- Provide admin endpoints for moderation
-
-## Token strategy
-
-| Token | Type | Storage | Lifetime |
-|-------|------|---------|----------|
-| Access token | Signed JWT | Client header/cookie | 15 minutes |
-| Refresh token | Opaque random string | Server-side, hashed | 7–30 days, rotated on use |
-
-The gateway validates JWTs locally using the auth service's public key so
-auth isn't called on every request.
-
-## Roadmap
-
-### Phase 1 — Foundations
-- User + credentials tables with UUIDs, audit fields, soft deletes
-- User entity, repository, service, controller
-- Global exception handler + standard error envelope
-- Input validation + OpenAPI docs
-
-### Phase 2 — Security
-- Password hashing (BCrypt/Argon2id)
-- Register, login, logout endpoints
-- JWT issue/verify with RS256
-- Refresh token rotation + revocation
-- Rate limiting + account lockout
-- Email verification + password reset
-
-### Phase 3 — Enterprise features
-- RBAC with roles + permissions
-- Admin endpoints for moderation
-- Audit log for auth events
-- Kafka outbox for reliable user events
-- GDPR export + erasure
-- MFA hooks (future)
-
-### Phase 4 — Observability
-- Structured logging with correlation IDs
-- Micrometer metrics
-- OpenTelemetry tracing
-- Custom health indicators
-
-## API versioning
-
-Routes are versioned in the URL (`/api/v1/...`). This keeps versions explicit,
-cacheable, and easy to route in the gateway.
-
-When a breaking change is needed:
-1. Copy the controller / DTOs to a `v2` package.
-2. Keep `v1` running for existing clients.
-3. Gateway routes clients based on an `Accept-Version` header or URL path.
-4. Deprecate `v1` before removal.
-
-## API surface (v1)
-
-### Public
-
-- `POST /api/v1/auth/register`
-- `POST /api/v1/auth/login`
-- `POST /api/v1/auth/refresh`
-- `POST /api/v1/auth/logout`
-- `POST /api/v1/auth/verify-email`
-- `POST /api/v1/auth/forgot-password`
-- `POST /api/v1/auth/reset-password`
-
-### Authenticated
-
-- `GET /api/v1/users/me`
-- `PATCH /api/v1/users/me`
-- `DELETE /api/v1/users/me`
-
-### Admin
-
-- `GET /api/v1/admin/users`
-- `GET /api/v1/admin/users/{id}`
-- `PATCH /api/v1/admin/users/{id}/status`
-- `POST /api/v1/admin/users/{id}/erase`
-- `GET /api/v1/admin/users/{id}/export`
-
-## Local dev
+## Quick start
 
 ```bash
 # from repo root
-make postgres      # starts Postgres
-make auth          # runs the service
+make postgres      # Postgres on :5432 (auth_db auto-created)
+make auth          # Spring Boot on :8080
+make test          # or: cd services/auth && mvn test  (140 tests)
+services/auth/scripts/flow-test.sh   # full live walkthrough incl. fake Discord
+
+curl http://localhost:8080/                      # service info
+curl http://localhost:8080/health/ready          # checks Postgres
+open http://localhost:8080/docs                  # Swagger UI
 ```
 
-Verify:
+First boot: Flyway creates + seeds the schema, and an RSA signing key is
+**auto-generated** into `services/auth/keys/` (gitignored). Try:
 
 ```bash
-curl http://localhost:8080/
-curl http://localhost:8080/actuator/health
+curl -c jar.txt -X POST localhost:8080/api/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"me@x.dev","password":"supersecret1","name":"Bomo"}'
+curl -b jar.txt localhost:8080/api/v1/users/me
 ```
 
-## Open decisions
+## The 60-second version
 
-- JWT signing: shared HMAC vs RSA keypair?
-- Refresh token storage: Postgres vs Redis?
-- Email delivery provider and local dev fallback
-- GDPR erasure: immediate or scheduled?
-- Multi-tenancy: single-tenant marketplace for now?
+| Question | Answer | Details |
+|---|---|---|
+| How does login work? | 15-min RS256 JWT in an httpOnly cookie + 7-day opaque refresh token (hash-only in Postgres), rotated on every use | [tokens](docs/tokens.md) |
+| What happens on cookie theft? | Replay of a consumed refresh token revokes the **whole session family** | [rotation & theft detection](docs/tokens.md#refresh-rotation--theft-detection) |
+| Where am I logged in? | `GET /auth/sessions` — live device list; revoke one or all | [api](docs/api.md#2-live-endpoints) |
+| How does Discord sign-in work? | Authorization-code flow with a signed state cookie; verified emails auto-link — one identity, many login methods | [accounts](docs/accounts.md) |
+| Who verifies JWTs? | The Go gateway, offline, via `/.well-known/jwks.json` — auth is not on the hot path | [architecture](docs/architecture.md) |
+| What's in the database? | 14 tables in schema `auth` — migrations V1 + V2 | [data model](docs/data-model.md) |
+| Is it tested? | 140 contract/unit tests + a live flow test (fake Discord + mail log) | [testing](docs/testing.md) |
+| Is it secure? | BCrypt-12, no user enumeration, HMAC-bound OAuth state, httpOnly+Lax cookies; known gaps listed honestly | [security](docs/security.md) |
+| Which env vars do I need? | None locally; the full table with why/what-breaks is in the config doc | [configuration](docs/configuration.md) |
+| What's next? | Email flows → RBAC admin (contract frozen in api.md) | [roadmap](docs/roadmap.md) |
+
+## Documentation
+
+Full docs live in **[docs/](docs/README.md)** (with their own index):
+
+1. [Architecture](docs/architecture.md) — fleet position, trust model
+2. [Tokens](docs/tokens.md) — strategy, claims, rotation
+3. [Accounts & linking](docs/accounts.md) — passwords vs OAuth
+4. [Data model](docs/data-model.md) — tables + conventions
+5. [API reference](docs/api.md) — live + designed endpoints, error codes
+6. [Configuration & keys](docs/configuration.md) — env vars explained, per-env setups
+7. [Testing](docs/testing.md) — the suite, what each test pins, how to extend
+8. [Security notes](docs/security.md) — posture + known gaps
+9. [Roadmap](docs/roadmap.md) — phases A–E
+
+Repo-wide: [`ARCHITECTURE.md`](../../docs/ARCHITECTURE.md) ·
+[`V1-SCHEMAS.md`](../../docs/V1-SCHEMAS.md) · [`DEV.md`](../../DEV.md)
