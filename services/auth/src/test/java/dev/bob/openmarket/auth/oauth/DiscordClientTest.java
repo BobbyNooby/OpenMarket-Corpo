@@ -93,6 +93,27 @@ class DiscordClientTest {
     }
 
     @Test
+    void response_slower_than_the_read_timeout_surfaces_as_oauth_failed() {
+        DiscordProperties props = new DiscordProperties();
+        props.setClientId("1234567890");
+        props.setClientSecret("sekrit");
+        props.setRedirectUri("http://localhost:3000/api/v1/auth/discord/callback");
+        props.setTokenUrl(discord.url("/api/oauth2/token").toString());
+        props.setUsersMeUrl(discord.url("/api/users/@me").toString());
+        props.setReadTimeoutMs(100); // tiny read timeout for the test
+        DiscordClient impatient = new DiscordClient(props);
+
+        discord.enqueue(new MockResponse()
+            .setHeadersDelay(2, TimeUnit.SECONDS) // way past the 100ms read timeout
+            .setHeader("Content-Type", "application/json")
+            .setBody("{\"access_token\": \"late\"}"));
+
+        assertThatThrownBy(() -> impatient.exchangeCode("the-code"))
+            .isInstanceOfSatisfying(DiscordClient.OAuthFlowException.class,
+                e -> assertThat(e.getMessage()).contains("oauth_failed"));
+    }
+
+    @Test
     void fetchMe_parses_the_real_user_schema_and_ignores_unknown_fields() throws Exception {
         discord.enqueue(new MockResponse()
             .setHeader("Content-Type", "application/json")

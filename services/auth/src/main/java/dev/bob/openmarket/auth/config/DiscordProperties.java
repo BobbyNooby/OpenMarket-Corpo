@@ -20,6 +20,8 @@ public class DiscordProperties {
     private String scopes = "identify email";
     private String successRedirect = "http://localhost:3000/auth/success";
     private String failureRedirect = "http://localhost:3000/auth/failure";
+    private int connectTimeoutMs = 3000;
+    private int readTimeoutMs = 5000;
 
     public String getClientId() {
         return clientId;
@@ -91,5 +93,21 @@ public class DiscordProperties {
 
     public void setFailureRedirect(String failureRedirect) {
         this.failureRedirect = failureRedirect;
+    }
+
+    public int getConnectTimeoutMs() {
+        return connectTimeoutMs;
+    }
+
+    public void setConnectTimeoutMs(int connectTimeoutMs) {
+        this.connectTimeoutMs = connectTimeoutMs;
+    }
+
+    public int getReadTimeoutMs() {
+        return readTimeoutMs;
+    }
+
+    public void setReadTimeoutMs(int readTimeoutMs) {
+        this.readTimeoutMs = readTimeoutMs;
     }
 }

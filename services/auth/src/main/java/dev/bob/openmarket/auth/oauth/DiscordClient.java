@@ -5,6 +5,7 @@ import dev.bob.openmarket.auth.config.DiscordProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
@@ -34,7 +35,12 @@ public class DiscordClient {
 
     public DiscordClient(DiscordProperties props) {
         this.props = props;
-        this.rest = RestClient.create();
+        // These calls sit inside @Transactional flows — a hanging socket would
+        // hold a DB connection hostage, so timeouts are mandatory.
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(props.getConnectTimeoutMs());
+        factory.setReadTimeout(props.getReadTimeoutMs());
+        this.rest = RestClient.builder().requestFactory(factory).build();
     }
 
     public String buildAuthorizeUrl(String state) {
