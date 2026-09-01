@@ -1,13 +1,14 @@
 package dev.bob.openmarket.auth.admin;
 
+import dev.bob.openmarket.auth.common.ClientIpResolver;
 import dev.bob.openmarket.auth.common.ConflictException;
+import dev.bob.openmarket.auth.common.ForbiddenException;
 import dev.bob.openmarket.auth.common.NotFoundException;
 import dev.bob.openmarket.auth.config.SecurityConfig;
 import dev.bob.openmarket.auth.support.TestSecurityConfig;
 import dev.bob.openmarket.auth.support.TestUsers;
 import dev.bob.openmarket.auth.token.TokenCookieService;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -34,6 +35,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Pins the moderation contract: the role ladder (owner ⊃ admin ⊃ moderator,
  * enforced by @PreAuthorize against the JWT roles claim) and each endpoint's
  * success/error shape. The stub decoder reads roles from the token suffix.
+ * The service-side guards (live DB roles, self-change, last-owner) throw
+ * ApiException subclasses, which surface here as the standard envelopes.
  */
 @WebMvcTest(AdminController.class)
 @Import({SecurityConfig.class, TokenCookieService.class, TestSecurityConfig.class})
@@ -42,6 +45,7 @@ class AdminControllerContractTest {
     @Autowired MockMvc mvc;
 
     @MockBean AdminService adminService;
+    @MockBean ClientIpResolver clientIpResolver;
 
     private static final String ID = TestUsers.USER_ID.toString();
 
@@ -111,6 +115,8 @@ class AdminControllerContractTest {
 
     @Test
     void ban_passes_reason_and_actor_and_returns_201() throws Exception {
+        when(clientIpResolver.resolve(any())).thenReturn("127.0.0.1");
+
         mvc.perform(post("/api/v1/admin/users/" + ID + "/ban")
                 .header("Authorization", "Bearer " + TestSecurityConfig.tokenWithRoles("admin"))
                 .contentType(MediaType.APPLICATION_JSON)
@@ -118,7 +124,8 @@ class AdminControllerContractTest {
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.reason").value("map hacking"));
 
-        verify(adminService).ban(eq(TestUsers.USER_ID), eq(TestUsers.USER_ID), eq("map hacking"), isNull());
+        verify(adminService).ban(eq(TestUsers.USER_ID), eq(TestUsers.USER_ID), eq("map hacking"),
+            isNull(), eq("127.0.0.1"));
     }
 
     @Test
@@ -131,7 +138,7 @@ class AdminControllerContractTest {
     @Test
     void unban_without_active_ban_is_404() throws Exception {
         doThrow(new NotFoundException("ban_not_found", "No active ban for this user"))
-            .when(adminService).unban(any());
+            .when(adminService).unban(any(), any(), any());
 
         mvc.perform(post("/api/v1/admin/users/" + ID + "/unban")
                 .header("Authorization", "Bearer " + TestSecurityConfig.tokenWithRoles("admin")))
@@ -142,7 +149,7 @@ class AdminControllerContractTest {
     @Test
     void ban_twice_conflicts() throws Exception {
         doThrow(new ConflictException("already_banned", "This user is already banned", null))
-            .when(adminService).ban(any(), any(), any(), any());
+            .when(adminService).ban(any(), any(), any(), any(), any());
 
         mvc.perform(post("/api/v1/admin/users/" + ID + "/ban")
                 .header("Authorization", "Bearer " + TestSecurityConfig.tokenWithRoles("admin"))
@@ -152,13 +159,24 @@ class AdminControllerContractTest {
     }
 
     @Test
+    void ban_reason_over_500_chars_is_400() throws Exception {
+        mvc.perform(post("/api/v1/admin/users/" + ID + "/ban")
+                .header("Authorization", "Bearer " + TestSecurityConfig.tokenWithRoles("admin"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"" + "x".repeat(501) + "\"}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("validation_failed"))
+            .andExpect(jsonPath("$.field").value("reason"));
+    }
+
+    @Test
     void warn_returns_the_created_warning() throws Exception {
         var warning = new dev.bob.openmarket.auth.domain.Warning();
         warning.setUserId(TestUsers.USER_ID);
         warning.setReason("be nice");
         org.springframework.test.util.ReflectionTestUtils.setField(warning, "id", TestUsers.OTHER_ID);
         org.springframework.test.util.ReflectionTestUtils.setField(warning, "createdAt", Instant.now());
-        when(adminService.warn(any(), any(), eq("be nice"))).thenReturn(warning);
+        when(adminService.warn(any(), any(), eq("be nice"), any())).thenReturn(warning);
 
         mvc.perform(post("/api/v1/admin/users/" + ID + "/warn")
                 .header("Authorization", "Bearer " + TestSecurityConfig.tokenWithRoles("moderator"))
@@ -170,7 +188,9 @@ class AdminControllerContractTest {
 
     @Test
     void setRoles_returns_the_new_roles() throws Exception {
-        when(adminService.setRoles(TestUsers.USER_ID, List.of("user", "moderator")))
+        when(clientIpResolver.resolve(any())).thenReturn("127.0.0.1");
+        when(adminService.setRoles(TestUsers.USER_ID, TestUsers.USER_ID,
+                List.of("user", "moderator"), "127.0.0.1"))
             .thenReturn(List.of("user", "moderator"));
 
         mvc.perform(patch("/api/v1/admin/users/" + ID + "/roles")
@@ -180,11 +200,13 @@ class AdminControllerContractTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.roles[0]").value("user"))
             .andExpect(jsonPath("$.roles[1]").value("moderator"));
+
+        verify(clientIpResolver).resolve(any());
     }
 
     @Test
     void setRoles_with_unknown_role_is_400() throws Exception {
-        when(adminService.setRoles(any(), any()))
+        when(adminService.setRoles(any(), any(), any(), any()))
             .thenThrow(new dev.bob.openmarket.auth.common.BadRequestException(
                 "unknown_role", "Unknown role: noxus", "roles"));
 
@@ -194,6 +216,66 @@ class AdminControllerContractTest {
                 .content("{\"roles\":[\"noxus\"]}"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value("unknown_role"));
+    }
+
+    // ── roles body validation (was an NPE→500 before @Valid) ──
+
+    @Test
+    void setRoles_with_null_roles_is_400_not_500() throws Exception {
+        mvc.perform(patch("/api/v1/admin/users/" + ID + "/roles")
+                .header("Authorization", "Bearer " + TestSecurityConfig.tokenWithRoles("admin"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"roles\":null}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("validation_failed"));
+
+        mvc.perform(patch("/api/v1/admin/users/" + ID + "/roles")
+                .header("Authorization", "Bearer " + TestSecurityConfig.tokenWithRoles("admin"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("validation_failed"));
+    }
+
+    // ── service-side guard envelopes (403/409, not 500) ──────
+
+    @Test
+    void setRoles_guard_violation_is_a_403_envelope() throws Exception {
+        doThrow(new ForbiddenException("insufficient_role", "Only an owner can grant the owner role"))
+            .when(adminService).setRoles(any(), any(), any(), any());
+
+        mvc.perform(patch("/api/v1/admin/users/" + ID + "/roles")
+                .header("Authorization", "Bearer " + TestSecurityConfig.tokenWithRoles("admin"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"roles\":[\"owner\"]}"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value("insufficient_role"));
+    }
+
+    @Test
+    void setRoles_last_owner_violation_is_a_409_envelope() throws Exception {
+        doThrow(new ConflictException("last_owner", "Cannot remove the last owner", null))
+            .when(adminService).setRoles(any(), any(), any(), any());
+
+        mvc.perform(patch("/api/v1/admin/users/" + ID + "/roles")
+                .header("Authorization", "Bearer " + TestSecurityConfig.tokenWithRoles("owner"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"roles\":[\"admin\"]}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("last_owner"));
+    }
+
+    @Test
+    void ban_rank_violation_is_a_403_envelope() throws Exception {
+        doThrow(new ForbiddenException("target_outranks",
+                "You cannot moderate a user at or above your own level"))
+            .when(adminService).ban(any(), any(), any(), any(), any());
+
+        mvc.perform(post("/api/v1/admin/users/" + ID + "/ban")
+                .header("Authorization", "Bearer " + TestSecurityConfig.tokenWithRoles("admin"))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"r\"}"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value("target_outranks"));
     }
 
     @Test
