@@ -46,9 +46,8 @@ jobs:
           python-version: "3.12"
       - run: |
           python -m pip install --upgrade pip
-          pip install pytest ruff
-          pip install -r services/presence/requirements.txt -r services/assets/requirements.txt || \
-            pip install -r services/presence/requirements-dev.txt -r services/assets/requirements-dev.txt || true
+          pip install -e services/presence -e services/assets
+          pip install pytest httpx
       - run: ruff check .
         working-directory: services/presence
       - run: ruff check .

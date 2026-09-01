@@ -1,4 +1,5 @@
 import os
+
 from fastapi import FastAPI
 
 app = FastAPI(title="Presence & Notifications", version="0.1.0")
