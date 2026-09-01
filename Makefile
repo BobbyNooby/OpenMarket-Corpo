@@ -71,6 +71,8 @@ test:
 	@echo "=== Python tests (presence + assets) ==="
 	cd services/presence && python -m pytest
 	cd services/assets && python -m pytest
+	@echo "=== Java tests (auth) ==="
+	cd services/auth && mvn -q test
 	@echo "All tests passed."
 
 lint:
@@ -80,4 +82,6 @@ lint:
 	@echo "=== Python lint (presence + assets) ==="
 	cd services/presence && ruff check .
 	cd services/assets && ruff check .
+	@echo "=== Java compile (auth) ==="
+	cd services/auth && mvn -q compile
 	@echo "All lint passed."
