@@ -50,7 +50,7 @@ that's a fleet-wide contract, not a local knob.
 
 | Var | Required | Default | What it does | What breaks without it |
 |---|---|---|---|---|
-| `AUTH_COOKIE_SECURE` | no | `false` | Sets the `Secure` flag on `om_access`/`om_refresh` (browsers then only send them over HTTPS) | `false` behind real HTTPS is a security finding — cookies would also travel over plain HTTP if ever downgraded. Set `true` in staging/prod. Compose passes it through as `${AUTH_COOKIE_SECURE:-false}` |
+| `AUTH_COOKIE_SECURE` | no | `true` | Sets the `Secure` flag on `om_access`/`om_refresh` (browsers then only send them over HTTPS) | Secure-by-default — browsers accept Secure cookies on `http://localhost`, so dev is unaffected and a forgotten env var in prod can't ship session cookies over plain HTTP. Set `false` only for exotic non-localhost plain-HTTP setups. Compose passes it through as `${AUTH_COOKIE_SECURE:-true}` |
 
 ### Discord OAuth — *live (Phase C)*
 
@@ -119,8 +119,8 @@ Still dev-grade secrets. It also mounts the named volume `auth-keys` at
 `/app/keys` and pins `JWT_KEY_PATH=/app/keys/jwt-rsa.jwk`, so a rebuilt
 container keeps the same signing key instead of silently generating a new
 one (which would invalidate every session). `AUTH_COOKIE_SECURE` is passed
-through (`${AUTH_COOKIE_SECURE:-false}` — set it to `true` when terminating
-TLS in front of compose). The container runs as a non-root `appuser` which
+through (`${AUTH_COOKIE_SECURE:-true}` — Secure is the default everywhere,
+including this local stack; browsers accept Secure cookies on localhost). The container runs as a non-root `appuser` which
 owns `/app/keys`, so first-boot key generation works inside the volume.
 
 ### Staging / production (behind HTTPS + gateway)

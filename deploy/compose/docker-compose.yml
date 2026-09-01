@@ -98,7 +98,7 @@ services:
       # Keep the signing key on a volume: a rebuild without it would
       # auto-generate a fresh key and silently invalidate every session.
       JWT_KEY_PATH: /app/keys/jwt-rsa.jwk
-      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
     volumes: [auth-keys:/app/keys]
     depends_on:
       postgres: { condition: service_healthy }

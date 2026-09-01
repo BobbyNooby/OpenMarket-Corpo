@@ -38,8 +38,11 @@ jwt:
   key-path: ${JWT_KEY_PATH:keys/jwt-rsa.jwk}
 
 auth:
-  # Set AUTH_COOKIE_SECURE=true wherever HTTPS terminates (staging/prod)
-  cookie-secure: ${AUTH_COOKIE_SECURE:false}
+  # Secure-by-default: browsers accept Secure cookies on http://localhost, so
+  # dev is unaffected — but a forgotten env var in prod can no longer ship
+  # session cookies over plain HTTP. Set AUTH_COOKIE_SECURE=false ONLY for
+  # exotic local setups (non-localhost plain HTTP).
+  cookie-secure: ${AUTH_COOKIE_SECURE:true}
   # Comma-separated proxy IPs/CIDRs whose X-Forwarded-For we trust.
   # Empty = trust nobody (remoteAddr is always the client IP).
   trusted-proxy-ip: ${AUTH_TRUSTED_PROXY_IP:}
