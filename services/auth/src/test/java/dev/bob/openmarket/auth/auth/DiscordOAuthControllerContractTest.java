@@ -1,5 +1,6 @@
 package dev.bob.openmarket.auth.auth;
 
+import dev.bob.openmarket.auth.common.ClientIpResolver;
 import dev.bob.openmarket.auth.config.DiscordProperties;
 import dev.bob.openmarket.auth.config.SecurityConfig;
 import dev.bob.openmarket.auth.oauth.DiscordClient;
@@ -44,6 +45,7 @@ class DiscordOAuthControllerContractTest {
     @MockBean AuthService authService;
     @MockBean DiscordClient discord;
     @MockBean OAuthStateService states;
+    @MockBean ClientIpResolver clientIpResolver;
 
     private static final String AUTH = "Authorization";
 

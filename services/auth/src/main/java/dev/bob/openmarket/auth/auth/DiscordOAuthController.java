@@ -1,6 +1,7 @@
 package dev.bob.openmarket.auth.auth;
 
 import dev.bob.openmarket.auth.common.ApiException;
+import dev.bob.openmarket.auth.common.ClientIpResolver;
 import dev.bob.openmarket.auth.common.ConflictException;
 import dev.bob.openmarket.auth.common.UnauthorizedException;
 import dev.bob.openmarket.auth.config.DiscordProperties;
@@ -44,17 +45,20 @@ public class DiscordOAuthController {
     private final OAuthStateService states;
     private final DiscordProperties props;
     private final TokenCookieService cookies;
+    private final ClientIpResolver clientIps;
 
     public DiscordOAuthController(AuthService authService,
                                   DiscordClient discord,
                                   OAuthStateService states,
                                   DiscordProperties props,
-                                  TokenCookieService cookies) {
+                                  TokenCookieService cookies,
+                                  ClientIpResolver clientIps) {
         this.authService = authService;
         this.discord = discord;
         this.states = states;
         this.props = props;
         this.cookies = cookies;
+        this.clientIps = clientIps;
     }
 
     @GetMapping("/discord")
@@ -143,10 +147,7 @@ public class DiscordOAuthController {
         return http.getHeader("User-Agent");
     }
 
-    private static String ip(HttpServletRequest http) {
-        String forwarded = http.getHeader("X-Forwarded-For");
-        return forwarded != null && !forwarded.isBlank()
-            ? forwarded.split(",")[0].trim()
-            : http.getRemoteAddr();
+    private String ip(HttpServletRequest http) {
+        return clientIps.resolve(http);
     }
 }
