@@ -49,11 +49,21 @@ Build order and what's deliberately deferred.
   72-byte password boundary, rate-limiter bounding, OAuth-state key
   domain separation, cleanup job, non-root container + persisted signing
   key. See [security.md](security.md) for mitigated vs still-open.
+- [ ] **Phase G — internal gRPC (next)**
+  `om.auth.v1` protos in `contracts/proto/` (buf): `GetUserById` (unary) +
+  `StreamUsersByIds` (server-streaming) as thin adapters over the existing
+  service layer; gRPC server on :9090 beside HTTP, reflection on,
+  status-code mapping, internal-call trust via gateway-passed metadata
+  (mTLS later). Gateway→auth is gRPC-first — no REST proxy stage.
 
 ## Deliberately deferred
 
 | Item | Why / when it arrives |
 |---|---|
+| Spring Boot upgrade off the 3.3.x line | 3.3.x is past OSS end-of-support (no more CVE patches); move to the latest supported line — top infrastructure priority, scheduled before new feature work |
+| Forgot-password timing oracle | known addresses do token-issue + SMTP (slow) vs instant 204 for unknown ones; latency deltas leak existence despite the always-204 contract. Fix: dummy work / async dispatch on the unknown path |
+| Prod gating for Swagger + actuator details | /docs and /actuator/health{show-details:always} are permitAll; unreachable externally today (internal compose network, gateway proxies nothing) — must be profile-gated before any reverse proxy lands |
+| Email-change existence oracle | 409 email_taken confirms an address exists; authenticated + throttled, weakly sensitive — revisit if abuse appears |
 | MFA (TOTP / passkeys) | auth service L2 feature; needs schema (`mfa_secrets`), enrollment + challenge flows — next major auth phase |
 | Sensitive-op re-auth (password/step-up for role change, delete, OAuth link) | needs a short-lived "re-auth" grace claim or fresh-password check endpoint |
 | Password blocklist (breached/common) | needs k-anonymity HIBP client or local top-100k set; policy hook (`@PasswordBytes`) already in place |
