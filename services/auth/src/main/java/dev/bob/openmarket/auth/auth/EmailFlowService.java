@@ -138,6 +138,10 @@ public class EmailFlowService {
     public void forgotPassword(String emailRaw, String ip) {
         String emailAddr = emailRaw.trim().toLowerCase();
         rateLimiter.allow("forgot", emailAddr + "|" + ip, 5, Duration.ofHours(1));
+        // Independent per-address cap: the IP component of the key above is
+        // rotatable (botnets, IPv6 /64s) — without this, distributed sources
+        // could each mail 5/h to one victim's inbox indefinitely.
+        rateLimiter.allow("forgot-target", emailAddr, 10, Duration.ofHours(1));
 
         users.findByEmail(emailAddr).filter(u -> u.getDeletedAt() == null).ifPresent(user -> {
             String raw = verifications.issue(user.getId(), VerificationService.TYPE_PASSWORD_RESET, user.getEmail());
