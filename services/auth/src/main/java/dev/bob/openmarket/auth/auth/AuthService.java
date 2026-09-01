@@ -95,14 +95,24 @@ public class AuthService {
         User user = new User();
         user.setEmail(email);
         user.setName(req.name().trim());
-        users.save(user);
+        try {
+            users.save(user);
+        } catch (DataIntegrityViolationException e) {
+            // concurrent signup with the same email won the unique-index race
+            throw new ConflictException("email_taken", "An account with this email already exists", "email");
+        }
 
         credentials.save(new Credential(user.getId(), passwordEncoder.encode(req.password())));
 
         UserProfile profile = new UserProfile();
         profile.setUserId(user.getId());
         profile.setUsername(username);
-        profiles.save(profile);
+        try {
+            profiles.save(profile);
+        } catch (DataIntegrityViolationException e) {
+            // concurrent signup with the same username won the unique-index race
+            throw new ConflictException("username_taken", "This username is already taken", "username");
+        }
 
         // bootstrap: the very first account owns the platform
         String role = users.count() == 1 ? "owner" : DEFAULT_ROLE;
@@ -273,7 +283,12 @@ public class AuthService {
         UserProfile profile = new UserProfile();
         profile.setUserId(user.getId());
         profile.setUsername(username);
-        profiles.save(profile);
+        try {
+            profiles.save(profile);
+        } catch (DataIntegrityViolationException e) {
+            // collision loop lost the unique-index race
+            throw new ConflictException("username_taken", "This username is already taken", "username");
+        }
 
         UserRole defaultRole = new UserRole();
         defaultRole.setUserId(user.getId());

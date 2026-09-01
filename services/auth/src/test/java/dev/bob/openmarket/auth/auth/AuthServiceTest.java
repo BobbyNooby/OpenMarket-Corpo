@@ -113,6 +113,32 @@ class AuthServiceTest {
     }
 
     @Test
+    void register_email_unique_race_surfaces_as_email_taken_not_500() {
+        happyRegisterMocks();
+        when(users.save(any())).thenThrow(new DataIntegrityViolationException("uq_users_email"));
+
+        assertThatThrownBy(() -> service.register(
+            new RegisterRequest("garen@demaciabook.com", "demaciaforever222", "G", null), null, null))
+            .isInstanceOfSatisfying(ConflictException.class, e -> {
+                assertThat(e.code()).isEqualTo("email_taken");
+                assertThat(e.field()).isEqualTo("email");
+            });
+    }
+
+    @Test
+    void register_username_unique_race_surfaces_as_username_taken_not_500() {
+        happyRegisterMocks();
+        when(profiles.save(any())).thenThrow(new DataIntegrityViolationException("uq_user_profiles_username"));
+
+        assertThatThrownBy(() -> service.register(
+            new RegisterRequest("garen@demaciabook.com", "demaciaforever222", "G", null), null, null))
+            .isInstanceOfSatisfying(ConflictException.class, e -> {
+                assertThat(e.code()).isEqualTo("username_taken");
+                assertThat(e.field()).isEqualTo("username");
+            });
+    }
+
+    @Test
     void register_duplicate_email_conflicts_with_field() {
         happyRegisterMocks();
         when(users.existsByEmail("garen@demaciabook.com")).thenReturn(true);
