@@ -127,6 +127,44 @@ class EmailFlowServiceTest {
     }
 
     @Test
+    void verifyEmail_with_change_token_for_an_address_claimed_in_the_meantime_conflicts() {
+        when(verifications.consume(eq("ct"), any(), any()))
+            .thenReturn(token(VerificationService.TYPE_EMAIL_CHANGE, "lux2@demaciabook.com"));
+        User u = user(true);
+        when(users.findByIdAndDeletedAtIsNull(TestUsers.USER_ID)).thenReturn(Optional.of(u));
+        // someone registered the address while the link sat in the inbox
+        when(users.existsByEmail("lux2@demaciabook.com")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.verifyEmail("ct"))
+            .isInstanceOfSatisfying(dev.bob.openmarket.auth.common.ConflictException.class,
+                e -> assertThat(e.code()).isEqualTo("email_taken"));
+        assertThat(u.getEmail()).isEqualTo("garen@demaciabook.com"); // unchanged
+    }
+
+    @Test
+    void verifyEmail_for_deleted_user_is_invalid_token() {
+        when(verifications.consume(eq("raw"), any(), any()))
+            .thenReturn(token(VerificationService.TYPE_EMAIL_VERIFY, "garen@demaciabook.com"));
+        when(users.findByIdAndDeletedAtIsNull(TestUsers.USER_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.verifyEmail("raw"))
+            .isInstanceOfSatisfying(UnauthorizedException.class,
+                e -> assertThat(e.code()).isEqualTo("invalid_token"));
+    }
+
+    @Test
+    void verifyEmail_with_garbage_token_is_401_invalid_token() {
+        when(verifications.consume(anyString(), any(), any()))
+            .thenThrow(new UnauthorizedException("invalid_token", "Unknown or already used token"));
+
+        assertThatThrownBy(() -> service.verifyEmail("nope"))
+            .isInstanceOfSatisfying(UnauthorizedException.class,
+                e -> assertThat(e.code()).isEqualTo("invalid_token"));
+    }
+
+    // ── change email ─────────────────────────────────────────
+
+    @Test
     void verifyEmail_with_garbage_token_is_401_invalid_token() {
         when(verifications.consume(anyString(), any(), any()))
             .thenThrow(new UnauthorizedException("invalid_token", "Unknown or already used token"));

@@ -84,7 +84,13 @@ public class EmailFlowService {
         User user = users.findByIdAndDeletedAtIsNull(token.getUserId())
             .orElseThrow(() -> new UnauthorizedException("invalid_token", "Unknown or already used token"));
         if (VerificationService.TYPE_EMAIL_CHANGE.equals(token.getType())) {
-            // the token's identifier IS the proof of control over the new address
+            // the token's identifier IS the proof of control over the new address —
+            // but the link can outlive the moment it was issued, so re-check it
+            // against live users right before applying (residual race after this
+            // check is caught by the unique constraint → global 409 handler).
+            if (users.existsByEmail(token.getIdentifier())) {
+                throw new ConflictException("email_taken", "An account with this email already exists", "email");
+            }
             user.setEmail(token.getIdentifier());
         }
         user.setEmailVerified(true);
