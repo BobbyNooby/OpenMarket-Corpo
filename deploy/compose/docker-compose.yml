@@ -95,6 +95,11 @@ services:
       KAFKA_BROKERS: kafka:9092
       OTLP_ENDPOINT: http://jaeger:4318
       MAIL_HOST: mailpit
+      # Keep the signing key on a volume: a rebuild without it would
+      # auto-generate a fresh key and silently invalidate every session.
+      JWT_KEY_PATH: /app/keys/jwt-rsa.jwk
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+    volumes: [auth-keys:/app/keys]
     depends_on:
       postgres: { condition: service_healthy }
       kafka: { condition: service_healthy }
@@ -201,6 +206,7 @@ services:
 volumes:
   pgdata:
   uploads:
+  auth-keys:
 
 networks:
   internal:
