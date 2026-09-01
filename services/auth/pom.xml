@@ -15,6 +15,10 @@
     <description>OpenMarket v2 — Auth &amp; Users (Java Spring Boot)</description>
     <properties>
         <java.version>21</java.version>
+        <!-- Boot 3.3.4 pins Mockito 5.11 / Byte Buddy 1.14, which can't
+             instrument on JDK 26+ runtimes. Override until Boot is upgraded. -->
+        <mockito.version>5.23.0</mockito.version>
+        <byte-buddy.version>1.18.12</byte-buddy.version>
     </properties>
     <dependencies>
         <dependency>
