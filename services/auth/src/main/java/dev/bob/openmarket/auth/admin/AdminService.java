@@ -200,7 +200,6 @@ public class AdminService {
             && userRoles.countLiveOwnersExcluding(userId) == 0) {
             throw new ConflictException("last_owner", "Cannot remove the last owner", null);
         }
-        List<String> newRoles = roleIds.stream().distinct().toList();
         // replace wholesale; affects future tokens only. The bulk delete must
         // hit the DB BEFORE the new inserts (unique constraint on the pair),
         // so it flushes immediately instead of waiting for commit ordering.
@@ -253,9 +252,41 @@ public class AdminService {
         user.setEmailVerified(false);
         user.setDeletedAt(Instant.now());
 
+        profiles.findById(userId).ifPresent(profile -> {
+            profile.setUsername(erasedUsername(userId));
+            profile.setBio(null);
+            profile.setSocialLinks(null);
+            profile.setAvatarUrl(null);
+            profile.setAccentColor(null);
+            profile.setLanguage("en");
+            profile.setNotificationPreferences("{}");
+        });
+        oauthAccounts.deleteByUserId(userId);
+        credentials.findById(userId).ifPresent(credentials::delete);
+
         refreshTokens.revokeAllForUser(userId);
         emit("user", userId, "user.deleted", Map.of("userId", userId.toString(), "erased", true));
         audit.record(actorId, "user.erased", userId, null, ip);
+    }
+
+    /**
+     * `erased-` + the id's first 8 hex chars satisfies the username pattern
+     * (^[a-z0-9_-]{3,32}$) and is unique unless two ids collide on their
+     * prefix — in that vanishing case, grow toward the full id, then fall
+     * back to a random suffix.
+     */
+    private String erasedUsername(UUID userId) {
+        String hex = userId.toString().replace("-", "");
+        if (!profiles.existsByUsername("erased-" + hex.substring(0, 8))) {
+            return "erased-" + hex.substring(0, 8);
+        }
+        for (int end = 12; end <= hex.length(); end += 4) {
+            String candidate = "erased-" + hex.substring(0, end);
+            if (candidate.length() <= 32 && !profiles.existsByUsername(candidate)) {
+                return candidate;
+            }
+        }
+        return UsernameDeriver.derive("erased", userId + "@erased.invalid");
     }
 
     // ── plumbing ─────────────────────────────────────────────
