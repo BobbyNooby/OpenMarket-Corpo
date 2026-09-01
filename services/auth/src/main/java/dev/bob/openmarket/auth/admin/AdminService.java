@@ -180,6 +180,24 @@ public class AdminService {
                 throw new BadRequestException("unknown_role", "Unknown role: " + role, "roles");
             }
         }
+        // H1: the actor's live roles come from the DB, never the JWT (a
+        // stolen-but-valid token keeps its old claims until it expires).
+        List<String> actorRoles = userRoles.findRoleIdsByUserId(actorId);
+        if (actorId.equals(userId)) {
+            throw new ForbiddenException("self_role_change", "You cannot change your own roles");
+        }
+        List<String> newRoles = roleIds.stream().distinct().toList();
+        if (newRoles.contains("owner") && !actorRoles.contains("owner")) {
+            throw new ForbiddenException("insufficient_role", "Only an owner can grant the owner role");
+        }
+        List<String> oldRoles = userRoles.findRoleIdsByUserId(userId);
+        if (oldRoles.contains("owner") && !actorRoles.contains("owner")) {
+            throw new ForbiddenException("insufficient_role", "Only an owner can change an owner's roles");
+        }
+        if (oldRoles.contains("owner") && !newRoles.contains("owner")
+            && userRoles.countLiveOwnersExcluding(userId) == 0) {
+            throw new ConflictException("last_owner", "Cannot remove the last owner", null);
+        }
         List<String> newRoles = roleIds.stream().distinct().toList();
         // replace wholesale; affects future tokens only. The bulk delete must
         // hit the DB BEFORE the new inserts (unique constraint on the pair),
@@ -193,8 +211,10 @@ public class AdminService {
         }
         emit("user", userId, "user.roles_changed",
             Map.of("userId", userId.toString(), "newRoles", newRoles));
-        audit.record(actorId, "user.roles_changed", userId,
-            Map.of("newRoles", newRoles), ip);
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("oldRoles", oldRoles);
+        details.put("newRoles", newRoles);
+        audit.record(actorId, "user.roles_changed", userId, details, ip);
         return newRoles;
     }
 
