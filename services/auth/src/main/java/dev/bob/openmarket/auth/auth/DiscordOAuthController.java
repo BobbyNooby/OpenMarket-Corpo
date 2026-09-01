@@ -108,6 +108,10 @@ public class DiscordOAuthController {
             redirect(res, failure(e.code()));
         } catch (DiscordClient.OAuthFlowException e) {
             redirect(res, failure("oauth_failed"));
+        } catch (Exception e) {
+            // the browser is mid-redirect here — a raw 500 JSON body helps
+            // nobody; surface the configured failure page instead
+            redirect(res, failure("oauth_failed"));
         }
     }
 
