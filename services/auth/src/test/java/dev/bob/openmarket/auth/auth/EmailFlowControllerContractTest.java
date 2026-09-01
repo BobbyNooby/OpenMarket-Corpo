@@ -82,6 +82,19 @@ class EmailFlowControllerContractTest {
     }
 
     @Test
+    void forgotPassword_rejects_oversized_email_with_400() throws Exception {
+        // 266 chars > RFC 5321 max (254) — must be validation, not a DB 500
+        String oversized = "a".repeat(250) + "@demaciabook.com";
+
+        mvc.perform(post("/api/v1/auth/forgot-password")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"" + oversized + "\"}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("validation_failed"))
+            .andExpect(jsonPath("$.field").value("email"));
+    }
+
+    @Test
     void resetPassword_is_public_and_returns_204() throws Exception {
         mvc.perform(post("/api/v1/auth/reset-password")
                 .contentType(MediaType.APPLICATION_JSON)
