@@ -117,6 +117,7 @@ public class AdminService {
     public Ban ban(UUID actorId, UUID userId, String reason, Instant expiresAt, String ip) {
         var user = users.findByIdAndDeletedAtIsNull(userId)
             .orElseThrow(() -> new NotFoundException("user_not_found", "User not found"));
+        assertActorOutranks(actorId, userId);
         if (bans.findFirstByUserIdAndLiftedAtIsNullOrderByBannedAtDesc(userId)
             .filter(b -> b.isActive(Instant.now())).isPresent()) {
             throw new ConflictException("already_banned", "This user is already banned", null);
@@ -161,6 +162,7 @@ public class AdminService {
     public Warning warn(UUID actorId, UUID userId, String reason, String ip) {
         var user = users.findByIdAndDeletedAtIsNull(userId)
             .orElseThrow(() -> new NotFoundException("user_not_found", "User not found"));
+        assertActorOutranks(actorId, userId);
         Warning warning = new Warning();
         warning.setUserId(user.getId());
         warning.setWarnedBy(actorId);
@@ -257,6 +259,33 @@ public class AdminService {
     }
 
     // ── plumbing ─────────────────────────────────────────────
+
+    /**
+     * H2: strict rank check over live DB roles — owner(3) &gt; admin(2) &gt;
+     * moderator(1) &gt; user/unknown(0). Mirrors the @PreAuthorize hierarchy
+     * but nobody moderates an equal, so a moderator cannot ban a moderator.
+     */
+    private void assertActorOutranks(UUID actorId, UUID targetId) {
+        int actor = maxLevel(userRoles.findRoleIdsByUserId(actorId));
+        int target = maxLevel(userRoles.findRoleIdsByUserId(targetId));
+        if (actor <= target) {
+            throw new ForbiddenException("target_outranks",
+                "You cannot moderate a user at or above your own level");
+        }
+    }
+
+    private static int maxLevel(List<String> roleIds) {
+        return roleIds.stream().mapToInt(AdminService::levelOf).max().orElse(0);
+    }
+
+    private static int levelOf(String roleId) {
+        return switch (roleId) {
+            case "owner" -> 3;
+            case "admin" -> 2;
+            case "moderator" -> 1;
+            default -> 0;
+        };
+    }
 
     private boolean banned(UUID userId) {
         return bans.findFirstByUserIdAndLiftedAtIsNullOrderByBannedAtDesc(userId)
