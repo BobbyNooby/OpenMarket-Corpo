@@ -90,6 +90,7 @@ class RefreshTokenServiceTest {
     void rotate_consumes_old_and_issues_successor_in_same_family() {
         RefreshToken old = active();
         when(repository.findByTokenHash(anyString())).thenReturn(Optional.of(old));
+        when(repository.consume(any(), any())).thenReturn(1); // this refresher wins the race
 
         RefreshTokenService.Rotated rotated = service.rotate("raw");
 
@@ -99,6 +100,20 @@ class RefreshTokenServiceTest {
         assertThat(rotated.entity().getTokenHash()).isNotEqualTo(old.getTokenHash());
         assertThat(rotated.entity().getUserAgent()).isEqualTo("LeagueClient/24.0"); // device inherited
         assertThat(rotated.rawToken()).isNotBlank();
+    }
+
+    @Test
+    void rotate_losing_the_consume_race_is_treated_as_reuse() {
+        RefreshToken old = active();
+        when(repository.findByTokenHash(anyString())).thenReturn(Optional.of(old));
+        when(repository.consume(any(), any())).thenReturn(0); // a concurrent refresher already won
+
+        assertThatThrownBy(() -> service.rotate("raw"))
+            .isInstanceOfSatisfying(UnauthorizedException.class,
+                e -> assertThat(e.code()).isEqualTo("refresh_token_reused"));
+
+        verify(repository).revokeActiveInFamily(eq(FAMILY), any()); // family revoked, incl. the winner's successor
+        verify(repository, never()).save(any());
     }
 
     @Test
@@ -123,6 +138,7 @@ class RefreshTokenServiceTest {
                 e -> assertThat(e.code()).isEqualTo("refresh_token_expired"));
 
         verify(repository, never()).revokeActiveInFamily(any(), any());
+        verify(repository, never()).consume(any(), any());
     }
 
     @Test
@@ -144,24 +160,17 @@ class RefreshTokenServiceTest {
     // ── revoke ───────────────────────────────────────────────
 
     @Test
-    void revoke_marks_single_token_revoked() {
-        RefreshToken t = active();
-        when(repository.findByTokenHash(anyString())).thenReturn(Optional.of(t));
-
+    void revoke_consumes_the_token_atomically() {
         service.revoke("raw");
 
-        assertThat(t.getRevokedAt()).isNotNull();
+        verify(repository).revokeByTokenHash(anyString(), any()); // conditional UPDATE, no load-then-set
     }
 
     @Test
-    void revokeAllForUser_revokes_every_active_token() {
-        RefreshToken a = active(), b = active();
-        when(repository.findByUserIdAndRevokedAtIsNull(TestUsers.USER_ID)).thenReturn(List.of(a, b));
-
+    void revokeAllForUser_is_one_bulk_update() {
         service.revokeAllForUser(TestUsers.USER_ID);
 
-        assertThat(a.getRevokedAt()).isNotNull();
-        assertThat(b.getRevokedAt()).isNotNull();
+        verify(repository).revokeAllForUser(eq(TestUsers.USER_ID), any());
     }
 
     @Test

@@ -27,6 +27,9 @@ import java.util.UUID;
  * <ul>
  *   <li>every refresh call consumes the presented token (revoked_at = now)
  *       and issues a new one in the same {@code family_id}</li>
+ *   <li>the consume is an atomic conditional UPDATE ({@code revoked_at is null}
+ *       predicate, decision on the row count) — concurrent refreshes can't both
+ *       succeed and fork the family; the loser is treated exactly like a replay</li>
  *   <li>presenting an already-consumed token is treated as theft evidence:
  *       the whole family is revoked and the client must log in again</li>
  * </ul>
@@ -66,7 +69,9 @@ public class RefreshTokenService {
     /**
      * Consumes {@code rawToken} and returns the successor token (same family)
      * plus its stored entity. Throws if the token is unknown, expired, or
-     * already consumed.
+     * already consumed. The consume itself is an
+     * atomic conditional UPDATE, so of two concurrent refreshes exactly one
+     * proceeds; the loser takes the reuse (theft) path.
      */
     @Transactional
     public Rotated rotate(String rawToken) {
@@ -74,33 +79,57 @@ public class RefreshTokenService {
 
         if (token.getRevokedAt() != null) {
             // reuse of a consumed token → assume theft, kill the family.
-            // Runs in its own tx and commits before the 401 goes out.
-            familyRevokeTx.executeWithoutResult(status ->
-                repository.revokeActiveInFamily(token.getFamilyId(), Instant.now()));
-            throw new UnauthorizedException("refresh_token_reused",
-                "Refresh token was already used; all sessions were revoked");
+            throwReuse(token.getFamilyId());
         }
         if (token.getExpiresAt().isBefore(Instant.now())) {
             throw new UnauthorizedException("refresh_token_expired", "Refresh token expired");
         }
 
-        token.setRevokedAt(Instant.now());
+        // The in-memory revoked_at check above is only a fast path — the real
+        // decision is this consume: `update … set revoked_at = now where
+        // id = ? and revoked_at is null`, judged by row count. Two concurrent
+        // refreshes can't both win.
+        Instant now = Instant.now();
+        if (repository.consume(token.getId(), now) == 0) {
+            throwReuse(token.getFamilyId());
+        }
+        // The bulk UPDATE bypassed the persistence context, so the managed
+        // entity still believes revoked_at is null. Mirror the consumed value
+        // onto it: flush then rewrites the identical timestamp instead of ever
+        // resurrecting the row with a stale null.
+        token.setRevokedAt(now);
+
         Issued issued = createAndSave(token.getUserId(), token.getFamilyId(), token.getId(),
             token.getUserAgent(), token.getIpAddress());
         return new Rotated(issued.entity(), issued.rawToken());
     }
 
+    /** Theft response: revoke the family in an independent tx, then 401. */
+    private void throwReuse(UUID familyId) {
+        // Runs in its own tx and commits before the 401 goes out.
+        familyRevokeTx.executeWithoutResult(status ->
+            repository.revokeActiveInFamily(familyId, Instant.now()));
+        throw new UnauthorizedException("refresh_token_reused",
+            "Refresh token was already used; all sessions were revoked");
+    }
+
     /** Logout of the session this token belongs to. No-op if the token is unknown. */
     @Transactional
     public void revoke(String rawToken) {
-        find(rawToken).setRevokedAt(Instant.now());
+        if (rawToken == null || rawToken.isBlank()) {
+            throw new UnauthorizedException("missing_refresh_token", "Refresh token is required");
+        }
+        // Conditional update, not load-then-set: can't race a concurrent
+        // rotation, and an already-consumed token keeps its original
+        // consumption timestamp.
+        repository.revokeByTokenHash(hash(rawToken), Instant.now());
     }
 
     /** E.g. on account deletion / "log out everywhere". */
     @Transactional
     public void revokeAllForUser(UUID userId) {
-        repository.findByUserIdAndRevokedAtIsNull(userId)
-            .forEach(t -> t.setRevokedAt(Instant.now()));
+        // One bulk UPDATE — beats a concurrent rotate() in both orderings.
+        repository.revokeAllForUser(userId, Instant.now());
     }
 
     /** Password change: revoke all except the current session's family. */

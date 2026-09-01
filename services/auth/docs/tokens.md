@@ -79,6 +79,19 @@ Implementation notes (two bugs the smoke test caught — both worth knowing):
   `rotate()` returns `(entity, rawToken)` and that raw token is exactly what
   goes into the cookie.
 
+And one the smoke test *couldn't* catch, because it's a race, not a
+sequence:
+
+- **Consume must be atomic.** The first version read `revoked_at` and then
+  wrote it (check-then-act): two tabs refreshing at the same instant could
+  both pass the check and fork the family, quietly disarming theft
+  detection. Consumption is now the conditional `UPDATE` from rule 2, and
+  the same pattern guards single-token `logout` and the revoke-all bulk
+  update. (Bulk `@Modifying` updates bypass the JPA persistence context, so
+  after a successful consume the service mirrors `revoked_at`/`used_at`
+  onto the loaded entity — flush then rewrites the identical value instead
+  of ever resurrecting the row with a stale null.)
+
 Families double as **device sessions**: each token stores `user_agent` +
 `ip_address`, and `GET /api/v1/auth/sessions` lists live families (the
 "manage devices" UI), with per-family revoke and revoke-all.

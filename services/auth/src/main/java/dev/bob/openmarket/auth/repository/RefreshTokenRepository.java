@@ -21,6 +21,24 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
     @Query("update RefreshToken t set t.revokedAt = :now where t.familyId = :familyId and t.revokedAt is null")
     int revokeActiveInFamily(@Param("familyId") UUID familyId, @Param("now") Instant now);
 
+    /**
+     * Atomic consume for rotation: revokes the row only if it is still live.
+     * @return 1 if this caller won the rotation race, 0 if someone else did
+     */
+    @Modifying
+    @Query("update RefreshToken t set t.revokedAt = :now where t.id = :id and t.revokedAt is null")
+    int consume(@Param("id") UUID id, @Param("now") Instant now);
+
+    /** "Log out everywhere" — one bulk UPDATE, beats a concurrent rotate() in both orderings. */
+    @Modifying
+    @Query("update RefreshToken t set t.revokedAt = :now where t.userId = :userId and t.revokedAt is null")
+    int revokeAllForUser(@Param("userId") UUID userId, @Param("now") Instant now);
+
+    /** Single-token logout without loading the row. Losers of the race leave the row untouched. */
+    @Modifying
+    @Query("update RefreshToken t set t.revokedAt = :now where t.tokenHash = :tokenHash and t.revokedAt is null")
+    int revokeByTokenHash(@Param("tokenHash") String tokenHash, @Param("now") Instant now);
+
     /** Ownership-guarded variant for the DELETE /sessions/{familyId} endpoint. */
     @Modifying
     @Query("update RefreshToken t set t.revokedAt = :now "
