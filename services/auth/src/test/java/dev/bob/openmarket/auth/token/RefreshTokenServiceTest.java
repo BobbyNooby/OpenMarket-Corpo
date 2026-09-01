@@ -98,8 +98,8 @@ class RefreshTokenServiceTest {
         assertThat(rotated.entity().getFamilyId()).isEqualTo(FAMILY); // same family
         assertThat(rotated.entity().getRotatedFromId()).isEqualTo(old.getId());
         assertThat(rotated.entity().getTokenHash()).isNotEqualTo(old.getTokenHash());
-        assertThat(rotated.entity().getExpiresAt()).isEqualTo(old.getExpiresAt());  // family window inherited
         assertThat(rotated.entity().getUserAgent()).isEqualTo("LeagueClient/24.0"); // device inherited
+        assertThat(rotated.entity().getExpiresAt()).isEqualTo(old.getExpiresAt());  // family window inherited
         assertThat(rotated.rawToken()).isNotBlank();
     }
 
@@ -182,6 +182,25 @@ class RefreshTokenServiceTest {
         // re-stub: last matching stubbing wins
         when(repository.revokeActiveInFamilyForUser(eq(FAMILY), eq(TestUsers.USER_ID), any())).thenReturn(0);
         assertThat(service.revokeFamilyForUser(TestUsers.USER_ID, FAMILY)).isFalse();
+    }
+
+    // ── revokeAllForUserExcept (JPQL null-param footgun) ─────
+
+    @Test
+    void revokeAllForUserExcept_null_keep_family_falls_back_to_revoke_all_including_current() {
+        service.revokeAllForUserExcept(TestUsers.USER_ID, null);
+
+        // no cookie context (e.g. reset via email link): EVERY family dies, the current one included
+        verify(repository).revokeAllForUser(eq(TestUsers.USER_ID), any());
+        verify(repository, never()).revokeAllForUserExcept(any(), any(), any());
+    }
+
+    @Test
+    void revokeAllForUserExcept_with_a_keep_family_uses_the_except_variant() {
+        service.revokeAllForUserExcept(TestUsers.USER_ID, FAMILY);
+
+        verify(repository).revokeAllForUserExcept(eq(TestUsers.USER_ID), eq(FAMILY), any());
+        verify(repository, never()).revokeAllForUser(any(), any());
     }
 
     // ── familyOf ─────────────────────────────────────────────
