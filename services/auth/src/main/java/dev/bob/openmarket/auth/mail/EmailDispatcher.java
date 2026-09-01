@@ -6,16 +6,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Component;
 
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.time.Duration;
-import java.time.Instant;
-
 /**
  * Outbound email. Two modes, chosen by configuration:
  * - `spring.mail.host` set (e.g. Mailpit in compose) → real SMTP
- * - otherwise → dev mode: the full mail is printed to the app log, which is
- *   exactly what the flow test greps to complete email flows end-to-end.
+ * - otherwise → dev mode: recipient + subject are always logged at INFO; the
+ *   full body (which carries live reset links) only with `auth.mail.log-full`
+ *   = true — the flow test sets it. Default off so a prod misconfiguration
+ *   can't leak password-reset tokens into log aggregation.
  */
 @Component
 public class EmailDispatcher {
@@ -25,13 +22,16 @@ public class EmailDispatcher {
     private final JavaMailSender mailSender;
     private final String host;
     private final String from;
+    private final boolean logFullBody;
 
     public EmailDispatcher(org.springframework.beans.factory.ObjectProvider<JavaMailSender> mailSender,
                            @Value("${spring.mail.host:}") String host,
-                           @Value("${spring.mail.from:OpenMarket <no-reply@openmarket.dev>}") String from) {
+                           @Value("${spring.mail.from:OpenMarket <no-reply@openmarket.dev>}") String from,
+                           @Value("${auth.mail.log-full:false}") boolean logFullBody) {
         this.mailSender = mailSender.getIfAvailable();
         this.host = host;
         this.from = from;
+        this.logFullBody = logFullBody;
     }
 
     public boolean isSmtpConfigured() {
@@ -40,7 +40,12 @@ public class EmailDispatcher {
 
     public void send(String to, String subject, String body) {
         if (!isSmtpConfigured()) {
-            log.info("[email:dev] from={} to={} subject={}\n{}", from, to, subject, body);
+            // Recipient + subject are safe metadata; the body embeds one-time
+            // links, so it only hits the logs when explicitly opted in.
+            log.info("[email:dev] from={} to={} subject={}", from, to, subject);
+            if (logFullBody) {
+                log.info("[email:dev] body:\n{}", body);
+            }
             return;
         }
         try {

@@ -63,6 +63,8 @@ export DISCORD_CLIENT_SECRET=fake-client-secret
 export DISCORD_AUTHORIZE_URL=http://localhost:5399/oauth2/authorize
 export DISCORD_TOKEN_URL=http://localhost:5399/api/oauth2/token
 export DISCORD_USERS_ME_URL=http://localhost:5399/api/users/@me
+# §10 greps token links from the dev mail log — full-body logging must stay on
+export AUTH_MAIL_LOG_FULL=true
 
 mvn -q spring-boot:run >"$TMP/app.log" 2>&1 &
 APP_PID=$!
