@@ -24,6 +24,10 @@ at `/docs` (springdoc; spec at `/v3/api-docs`).
   `om_access` cookie (direct dev calls) — `TokenCookieService` accepts both,
   header wins. Refresh/logout additionally use the `om_refresh` cookie.
 - Identity is **always** the token's `sub` — never a body/path parameter.
+- Input limits come back as `validation_failed` with a `field`: emails
+  ≤254 chars, passwords 8–128 chars **and** ≤72 UTF-8 bytes (register,
+  credentials add/change, set + reset). Unknown routes are `404 not_found`,
+  wrong verbs `405 method_not_allowed` — all in the standard envelope.
 - Success = the resource; errors = the [envelope](#error-envelope).
 - 200 read / 201 created / 202 accepted / 204 no content — the frontend keys
   off these.
@@ -42,9 +46,9 @@ at `/docs` (springdoc; spec at `/v3/api-docs`).
 
 | Method & path | Auth | Success | Errors |
 |---|---|---|---|
-| `POST /api/v1/auth/register` | — | **201** `{email, password, name, username?}` → user JSON + both cookies set | 400 `validation_failed`/`malformed_json` · 409 `email_taken`, `username_taken` |
-| `POST /api/v1/auth/login` | — | **200** `{email, password}` → user JSON + cookies | 401 `invalid_credentials` (identical for unknown email — no enumeration) |
-| `POST /api/v1/auth/refresh` | refresh cookie | **200** — rotation: presented token consumed, successor in same family, new cookies | 401 `missing_refresh_token`, `invalid_refresh_token`, `refresh_token_expired`, `refresh_token_reused` (family revoked), `account_deleted` |
+| `POST /api/v1/auth/register` | — | **201** `{email, password, name, username?}` → user JSON + both cookies set | 400 `validation_failed` (≤254-char email, ≤72-byte password)/`malformed_json` · 409 `email_taken`, `username_taken` |
+| `POST /api/v1/auth/login` | — | **200** `{email, password}` → user JSON + cookies | 401 `invalid_credentials` — identical for unknown email **and** while throttled (≥10 failed attempts per account in 15 min), so no enumeration |
+| `POST /api/v1/auth/refresh` | refresh cookie | **200** — rotation: presented token consumed, successor in same family (absolute 7-day life from family creation), new cookies; a concurrent double-refresh may revoke the family | 401 `missing_refresh_token`, `invalid_refresh_token`, `refresh_token_expired`, `refresh_token_reused` (family revoked), `account_deleted` |
 | `POST /api/v1/auth/logout` | refresh cookie (access token **not** required) | **204** always — best-effort revoke + cookies cleared | — |
 
 ### auth — session management (devices)
@@ -61,7 +65,7 @@ at `/docs` (springdoc; spec at `/v3/api-docs`).
 |---|---|---|---|
 | `GET /api/v1/users/me` | access | **200** — identity + `loginMethods` + `profile` (see below) | 401 `unauthorized` · 404 `user_not_found`, `profile_not_found` |
 | `PATCH /api/v1/users/me` | access | **200** — partial; null fields untouched; map fields replace whole object | 400 `validation_failed` · 409 `username_taken` |
-| `DELETE /api/v1/users/me` | access | **204** — soft delete + all sessions revoked | 401 · 404 |
+| `DELETE /api/v1/users/me` | access | **204** — soft delete: email tombstoned (**freed for re-registration**), all sessions revoked, emits `user.deleted {erased: false}` | 401 · 404 |
 
 `GET /users/me` response shape:
 
@@ -97,15 +101,19 @@ callback. Full flow description: [accounts.md](accounts.md).
 |---|---|---|---|
 | `GET /api/v1/auth/discord` | — | **302** → Discord authorize URL (+ `om_oauth` cookie) | — |
 | `GET /api/v1/auth/discord/link` | access | **302** → Discord (state binds the user id) | 401 JSON if anonymous |
-| `GET /api/v1/auth/discord/callback` | state cookie | login / auto-link by verified email / create identity / attach to current user → **302** to success page (+ auth cookies on login/signup) | `oauth_state_mismatch`, `provider_already_linked`, `oauth_email_required`, `oauth_failed` |
+| `GET /api/v1/auth/discord/callback` | state cookie | login / auto-link by verified email / create identity / attach to current user → **302** to success page (+ auth cookies on login/signup) | `oauth_state_mismatch`, `provider_already_linked`, `oauth_email_required`, `oauth_failed`, `account_banned` |
 | `DELETE /api/v1/auth/connections/discord` | access | **204** — unlink | 404 `provider_not_linked` · 409 `last_login_method` |
 
 ## §3 Admin & moderation (Phase E, live)
 
 Authorization: `@PreAuthorize` against the JWT `roles` claim with the
 hierarchy **owner ⊃ admin ⊃ moderator** (an admin passes moderator checks).
-403 `forbidden` when the roles don't qualify. **The first registered account
-on an empty platform becomes `owner`** (bootstrap).
+403 `forbidden` when the roles don't qualify; role-changing endpoints add
+the guards `self_role_change`, `insufficient_role`, `target_outranks`
+(403) and `last_owner` (409 — the last owner can't lose the owner role).
+Moderation endpoints additionally require the actor to **outrank** the
+target (`target_outranks`). **The first registered account on an empty
+platform becomes `owner`** (bootstrap).
 
 | Method & path | Role | Notes |
 |---|---|---|
@@ -116,7 +124,7 @@ on an empty platform becomes `owner`** (bootstrap).
 | `POST /api/v1/admin/users/{id}/warn` | moderator | **201** `{reason}` |
 | `PATCH /api/v1/admin/users/{id}/roles` | admin | **200** `{roles:[...]}` — replaces wholesale, **future tokens only** (re-login to pick up) |
 | `GET /api/v1/admin/users/{id}/export` | admin | **200** — GDPR export of the auth slice |
-| `POST /api/v1/admin/users/{id}/erase` | owner | **202** — anonymize identity/profile + revoke all sessions + `user.deleted` event |
+| `POST /api/v1/admin/users/{id}/erase` | owner | **202** — anonymize identity/profile + purge linked OAuth identities & password credentials + revoke all sessions + `user.deleted {erased: true}` (recorded in `audit_log`) |
 
 ## Error envelope
 
@@ -128,8 +136,11 @@ Every error — validation, auth, Spring Security — uses:
 
 | Code | HTTP | Status |
 |---|---|---|
-| `validation_failed` | 400 | live |
+| `validation_failed` | 400 | live — includes >254-char emails and >72-byte passwords |
 | `malformed_json` | 400 | live |
+| `not_found` | 404 | live — unknown route/resource (framework-level, same envelope) |
+| `method_not_allowed` | 405 | live — wrong verb on a known route |
+| `conflict` | 409 | live — generic conflict envelope |
 | `invalid_credentials` | 401 | live |
 | `unauthorized` | 401 | live |
 | `missing_refresh_token` | 401 | live |
@@ -139,16 +150,18 @@ Every error — validation, auth, Spring Security — uses:
 | `account_deleted` | 401 | live |
 | `oauth_email_required` | — | live (OAuth redirect `?error=`) |
 | `oauth_state_mismatch` / `oauth_failed` | — | live (OAuth redirect `?error=`) |
-| `email_taken` / `username_taken` | 409 | live |
+| `email_taken` / `username_taken` | 409 | live — `email_taken` also surfaces at email-change **consume time** if the address was claimed while the token was pending |
 | `user_not_found` / `profile_not_found` | 404 | live |
 | `session_not_found` | 404 | live |
 | `password_exists` / `password_not_set` / `last_login_method` / `provider_not_linked` / `provider_already_linked` | — | live |
 | `forbidden` | 403 | live |
+| `self_role_change` / `insufficient_role` / `target_outranks` | 403 | live — admin role/moderation guards |
+| `last_owner` | 409 | live — the platform's last owner cannot lose the owner role |
 | `internal_error` | 500 | live |
 | `email_already_verified` | 409 | live |
 | `invalid_token` / `token_expired` | 400 | live — e-mailed confirm tokens |
 | `rate_limited` (+ `Retry-After` header) | 429 | live — email-sending endpoints (in-memory fixed window) |
-| `account_banned` | 403 | live — enforced at login + refresh |
+| `account_banned` | 403 | live — enforced at login + refresh + Discord OAuth login |
 | `already_banned` / `ban_not_found` / `unknown_role` | — | live (admin surface) |
 
 ---

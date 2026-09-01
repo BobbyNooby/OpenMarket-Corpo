@@ -39,7 +39,7 @@ single URL — compose already passes `DATABASE_URL`.
 
 | Var | Required | Default | What it does | What breaks without it |
 |---|---|---|---|---|
-| `JWT_KEY_PATH` | no | `keys/jwt-rsa.jwk` | Where the RS256 signing key lives (relative to the service dir). Missing file → **auto-generated on first boot** and persisted | nothing in dev; in prod a fresh key would silently invalidate all outstanding access tokens — always mount one (see [key management](#key-management-rs256)) |
+| `JWT_KEY_PATH` | no | `keys/jwt-rsa.jwk` | Where the RS256 signing key lives (relative to the service dir, or absolute). Missing file → **auto-generated on first boot** and persisted | nothing in dev; in prod a fresh key would silently invalidate all outstanding access tokens — always mount one (see [key management](#key-management-rs256)). Compose pins it to `/app/keys/jwt-rsa.jwk` on the `auth-keys` volume so container rebuilds keep the key |
 
 Related yml (not env, but same family): `jwt.issuer` (`auth`), `jwt.audience`
 (`openmarket`), `jwt.access-ttl-minutes` (15), `jwt.refresh-ttl-days` (7).
@@ -50,7 +50,7 @@ that's a fleet-wide contract, not a local knob.
 
 | Var | Required | Default | What it does | What breaks without it |
 |---|---|---|---|---|
-| `AUTH_COOKIE_SECURE` | no | `false` | Sets the `Secure` flag on `om_access`/`om_refresh` (browsers then only send them over HTTPS) | `false` behind real HTTPS is a security finding — cookies would also travel over plain HTTP if ever downgraded. Set `true` in staging/prod |
+| `AUTH_COOKIE_SECURE` | no | `false` | Sets the `Secure` flag on `om_access`/`om_refresh` (browsers then only send them over HTTPS) | `false` behind real HTTPS is a security finding — cookies would also travel over plain HTTP if ever downgraded. Set `true` in staging/prod. Compose passes it through as `${AUTH_COOKIE_SECURE:-false}` |
 
 ### Discord OAuth — *live (Phase C)*
 
@@ -62,6 +62,8 @@ that's a fleet-wide contract, not a local knob.
 | `DISCORD_TOKEN_URL` | no | `https://discord.com/api/oauth2/token` | Code-exchange endpoint (form-urlencoded per Discord's spec) | — |
 | `DISCORD_USERS_ME_URL` | no | `https://discord.com/api/users/@me` | Profile endpoint (`identify email` scopes) | — |
 | `DISCORD_SCOPES` | no | `identify email` | `email` scope is what makes verified-email auto-linking possible | without it: no email → `oauth_email_required` for new users |
+| `DISCORD_CONNECT_TIMEOUT_MS` | no | `3000` | Connect timeout (ms) for outbound Discord HTTP calls | — |
+| `DISCORD_READ_TIMEOUT_MS` | no | `5000` | Read timeout (ms) — without it a slow/hung Discord could stall the callback indefinitely | — |
 | `OAUTH_SUCCESS_REDIRECT` | no | `http://localhost:3000/auth/success` | Frontend page after a successful OAuth round-trip | — |
 | `OAUTH_FAILURE_REDIRECT` | no | `http://localhost:3000/auth/failure` | Frontend page on OAuth failure — receives `?error=<code>` | — |
 
@@ -69,7 +71,7 @@ that's a fleet-wide contract, not a local knob.
 
 | Var | Required | Default | What it does | What breaks without it |
 |---|---|---|---|---|
-| `MAIL_HOST` | no | *(empty)* | SMTP host. **Empty = dev mode: full mail bodies printed to the app log** (the flow test greps them to complete email flows) | email flows still work, mail is just logged |
+| `MAIL_HOST` | no | *(empty)* | SMTP host. **Empty = dev mode: recipient + subject logged** (full bodies too only with `auth.mail.log-full=true` — the flow test enables it to complete email flows) | email flows still work, mail is just logged |
 | `MAIL_PORT` | no | `1025` | SMTP port (Mailpit's default) | — |
 | `MAIL_FROM` | no | `OpenMarket <no-reply@openmarket.dev>` | From header on outgoing mail | — |
 | `APP_URL` | no | `http://localhost:3000` | Frontend base URL used inside emailed links (gateway origin, never auth :8080) | links point to the wrong place |
@@ -77,6 +79,12 @@ that's a fleet-wide contract, not a local knob.
 Verification token TTLs live in `application.yml`:
 `auth.verification.email-verify-hours: 24`,
 `auth.verification.password-reset-minutes: 60`.
+
+### Proxy trust & client IP
+
+| Var | Required | Default | What it does | What breaks without it |
+|---|---|---|---|---|
+| `AUTH_TRUSTED_PROXY_IP` | no | *(empty)* | Comma-separated IPs or CIDRs (e.g. `10.0.0.1,172.16.0.0/12`) of reverse proxies allowed to set `X-Forwarded-For`. The header is honoured **only** when the direct TCP peer (`remoteAddr`) matches an entry | *(empty) = trust nobody*: the TCP peer is always used as the client IP — session metadata and IP-based rate limits record the gateway's address instead of the real client. Behind the gateway, set it to the gateway/proxy IP to restore real client IPs; exposed directly, leave it empty (the header would be forgeable) |
 
 ### Platform (already standard in the repo)
 
@@ -107,7 +115,13 @@ OAuth needs the vars above (or run the full flow against the fake Discord:
 
 The compose file passes `DATABASE_URL=postgres://om:…@postgres:5432/auth_db`
 to the auth container — one var instead of four, same schema behaviour.
-Still dev-grade secrets.
+Still dev-grade secrets. It also mounts the named volume `auth-keys` at
+`/app/keys` and pins `JWT_KEY_PATH=/app/keys/jwt-rsa.jwk`, so a rebuilt
+container keeps the same signing key instead of silently generating a new
+one (which would invalidate every session). `AUTH_COOKIE_SECURE` is passed
+through (`${AUTH_COOKIE_SECURE:-false}` — set it to `true` when terminating
+TLS in front of compose). The container runs as a non-root `appuser` which
+owns `/app/keys`, so first-boot key generation works inside the volume.
 
 ### Staging / production (behind HTTPS + gateway)
 
@@ -146,6 +160,10 @@ shared database (that's why everything is schema-qualified, not db-qualified).
 | `jwt.refresh-ttl-days` | `7` | Refresh token lifetime (and cookie max-age) |
 | `jwt.key-path` | env `JWT_KEY_PATH` | Signing key location |
 | `auth.cookie-secure` | env `AUTH_COOKIE_SECURE` | Cookie `Secure` flag |
+| `auth.trusted-proxy-ip` | env `AUTH_TRUSTED_PROXY_IP` | Proxies allowed to set `X-Forwarded-For` (see above) |
+| `auth.discord.connect-timeout-ms` | env `DISCORD_CONNECT_TIMEOUT_MS` | Discord HTTP connect timeout |
+| `auth.discord.read-timeout-ms` | env `DISCORD_READ_TIMEOUT_MS` | Discord HTTP read timeout |
+| `auth.mail.log-full` | `false` | Dev-mode mail logging detail. `false` (default): recipient + subject only — a prod misconfiguration can't leak reset links into log aggregation. `true`: full bodies too (the flow test sets it). See `mail/EmailDispatcher` |
 | `spring.flyway.schemas` | `auth` | Migrations own this schema (+ `create-schemas: true`) |
 | `spring.jpa.hibernate.ddl-auto` | `validate` | Entities must match migrations — Flyway is the source of truth |
 | `springdoc.swagger-ui.path` | `/docs` | Swagger UI |
@@ -155,10 +173,13 @@ shared database (that's why everything is schema-qualified, not db-qualified).
 - **Dev:** on boot, if `JWT_KEY_PATH` doesn't exist, a 2048-bit keypair is
   generated and persisted. Restarts keep the same key → the gateway's cached
   JWKS stays valid. The file contains the **private** key and is gitignored
-  (`services/auth/keys/`). Never copy it anywhere.
+  (`services/auth/keys/`). Never copy it anywhere. In compose the key lives
+  on the `auth-keys` volume, so rebuilds keep it too.
 - **Prod:** mount a real key file at `JWT_KEY_PATH` (secret manager →
   volume). Regenerating invalidates every outstanding access token — they
-  all die within 15 min; that's the whole recovery story.
+  all die within 15 min; that's the whole recovery story. The mount point's
+  parent directory must be writable by the container's `appuser` if the key
+  is allowed to auto-generate — pre-provisioning the file needs only read.
 - **Rotation:** the JWT header carries `kid` matching the JWKS entry.
   Multi-key rotation (verify with old + new, issue with new) is a config
   change — the `JWKSource` can hold several keys.
