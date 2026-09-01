@@ -45,6 +45,10 @@ public class VerificationService {
 
     @Transactional
     public String issue(UUID userId, String type, String identifier) {
+        // only the newest link of a kind stays live — an outstanding token of
+        // the same user+type must not outlive the latest intent (a "change to
+        // A" link surviving a "change to B" request would materialize A).
+        repository.supersedeAllForUser(userId, type, Instant.now());
         String raw = newTokenValue();
         VerificationToken token = new VerificationToken();
         token.setUserId(userId);

@@ -89,6 +89,39 @@ class VerificationServiceTest {
         assertThat(savedToken().getExpiresAt()).isAfter(Instant.now().plusSeconds(55 * 60)); // ~60 min
     }
 
+    @Test
+    void issue_supersedes_outstanding_tokens_of_the_same_type() {
+        service.issue(TestUsers.USER_ID, VerificationService.TYPE_EMAIL_VERIFY, "garen@demaciabook.com");
+
+        verify(repository).supersedeAllForUser(eq(TestUsers.USER_ID),
+            eq(VerificationService.TYPE_EMAIL_VERIFY), any());
+    }
+
+    @Test
+    void reissue_supersedes_only_its_own_type() {
+        service.issue(TestUsers.USER_ID, VerificationService.TYPE_EMAIL_VERIFY, "garen@demaciabook.com");
+        service.issue(TestUsers.USER_ID, VerificationService.TYPE_PASSWORD_RESET, "garen@demaciabook.com");
+
+        var types = ArgumentCaptor.forClass(String.class);
+        verify(repository, times(2)).supersedeAllForUser(eq(TestUsers.USER_ID), types.capture(), any());
+        assertThat(types.getAllValues())
+            .containsExactly(VerificationService.TYPE_EMAIL_VERIFY, VerificationService.TYPE_PASSWORD_RESET);
+    }
+
+    @Test
+    void token_superseded_by_a_reissue_fails_consume() {
+        // what the bulk UPDATE leaves behind for the superseded link: used_at set
+        VerificationToken superseded = token(VerificationService.TYPE_EMAIL_VERIFY,
+            Instant.now().plusSeconds(600), Instant.now());
+        when(repository.findByTokenHash(anyString())).thenReturn(Optional.of(superseded));
+
+        assertThatThrownBy(() -> service.consume("old-raw", VerificationService.TYPE_EMAIL_VERIFY))
+            .isInstanceOfSatisfying(UnauthorizedException.class,
+                e -> assertThat(e.code()).isEqualTo("invalid_token"));
+
+        verify(repository, never()).consume(any(), any());
+    }
+
     // ── consume ──────────────────────────────────────────────
 
     @Test
