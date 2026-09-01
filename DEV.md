@@ -59,6 +59,14 @@ All services share these via `.env` at repo root:
 | `POSTGRES_HOST` | `localhost` | DB host |
 | `POSTGRES_PORT` | `5432` | DB port |
 
+Auth-specific vars (see `services/auth/README.md` for the full story):
+
+| Var | Default | Description |
+|-----|---------|-------------|
+| `JWT_KEY_PATH` | `keys/jwt-rsa.jwk` | RS256 signing key; **auto-generated on first boot** (gitignored) |
+| `AUTH_COOKIE_SECURE` | `false` | Set `true` behind HTTPS |
+| `DATABASE_URL` | — | Optional libpq URL; auth prefers it when set (e.g. Supabase) |
+
 Each service connects to its own database:
 - `auth` → `auth_db`
 - `catalogue` → `catalogue_db`
