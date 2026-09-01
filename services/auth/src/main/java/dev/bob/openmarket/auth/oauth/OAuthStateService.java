@@ -17,7 +17,8 @@ import java.util.Base64;
  *
  * <p>Format: {@code base64url(payload).base64url(HMAC-SHA256(payload))} where
  * the payload is `{"mode":"login|link","sub":"<uuid for link>","exp":epoch}`.
- * The HMAC key is derived (SHA-256) from the RSA signing key — stable across
+ * The HMAC key is derived from the RSA signing key via a labeled, domain-
+ * separated second SHA-256 round (see {@link #deriveKey}) — stable across
  * restarts, never stored separately, and useless without the private key.
  * The state travels twice: as a query param to Discord and as the httpOnly
  * `om_oauth` cookie; the callback requires both to match, which is exactly
@@ -28,6 +29,14 @@ public class OAuthStateService {
 
     public static final String STATE_COOKIE = "om_oauth";
     private static final long TTL_SECONDS = 600;
+
+    /**
+     * Purpose label for the HMAC-key derivation. Same idea as HKDF's "info":
+     * key material for one purpose must never equal key material for another,
+     * even when both start from the same secret.
+     */
+    private static final byte[] STATE_KEY_LABEL =
+        "openmarket:oauth-state:v1:".getBytes(StandardCharsets.UTF_8);
 
     private final byte[] hmacKey;
     private final ObjectMapper mapper;
@@ -81,10 +90,25 @@ public class OAuthStateService {
         return mac.doFinal(payload.getBytes(StandardCharsets.UTF_8));
     }
 
-    private static byte[] deriveKey(RSAKey signingKey) {
+    /**
+     * Domain-separated key derivation: {@code SHA-256(label || SHA-256(privateKey))}.
+     * The RSA private key's primary job is signing JWTs; hashing its encoding
+     * once and using the result directly as the state HMAC key would mean two
+     * unrelated purposes share one key derivation, so OAuth-state validity is
+     * coupled to JWT key rotation and any future consumer that hashes the same
+     * key the same way silently gets the identical HMAC key. The labeled second
+     * round binds the output to exactly this purpose (and version), keeping the
+     * property that made the derivation attractive: stable across restarts,
+     * never stored, and useless without the private key. Package-private so the
+     * domain-separation test can pin the exact construction.
+     */
+    static byte[] deriveKey(RSAKey signingKey) {
         try {
-            return MessageDigest.getInstance("SHA-256")
+            byte[] base = MessageDigest.getInstance("SHA-256")
                 .digest(signingKey.toPrivateKey().getEncoded());
+            MessageDigest sha = MessageDigest.getInstance("SHA-256");
+            sha.update(STATE_KEY_LABEL);
+            return sha.digest(base);
         } catch (Exception e) {
             throw new IllegalStateException("Could not derive OAuth state key", e);
         }

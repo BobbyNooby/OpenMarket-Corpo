@@ -7,7 +7,9 @@ import com.nimbusds.jose.jwk.RSAKey;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.security.KeyPairGenerator;
+import java.security.MessageDigest;
 import java.security.interfaces.RSAPublicKey;
 import java.util.UUID;
 
@@ -88,5 +90,32 @@ class OAuthStateServiceTest {
         String expired = service.issueInternal("login", null, 1); // epoch 1 = long past
 
         assertThat(service.validate(expired, expired)).isNull();
+    }
+
+    @Test
+    void state_key_is_domain_separated_from_the_raw_key_derivation() throws Exception {
+        KeyPairGenerator gen = KeyPairGenerator.getInstance("RSA");
+        gen.initialize(2048);
+        var pair = gen.generateKeyPair();
+        RSAKey key = new RSAKey.Builder((RSAPublicKey) pair.getPublic())
+            .privateKey(pair.getPrivate())
+            .build();
+
+        byte[] rawDerivation = MessageDigest.getInstance("SHA-256")
+            .digest(pair.getPrivate().getEncoded());
+        byte[] label = "openmarket:oauth-state:v1:".getBytes(StandardCharsets.UTF_8);
+        byte[] labeledDigest = MessageDigest.getInstance("SHA-256")
+            .digest(concat(label, rawDerivation));
+
+        assertThat(OAuthStateService.deriveKey(key))
+            .isNotEqualTo(rawDerivation)   // not the raw, unlabeled reuse
+            .isEqualTo(labeledDigest);     // exactly the labeled second round
+    }
+
+    private static byte[] concat(byte[] a, byte[] b) {
+        byte[] out = new byte[a.length + b.length];
+        System.arraycopy(a, 0, out, 0, a.length);
+        System.arraycopy(b, 0, out, a.length, b.length);
+        return out;
     }
 }
