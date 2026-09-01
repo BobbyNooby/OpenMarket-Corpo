@@ -54,4 +54,18 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
     int revokeAllForUserExcept(@Param("userId") UUID userId,
                                @Param("keepFamilyId") UUID keepFamilyId,
                                @Param("now") Instant now);
+
+    /**
+     * Cleanup sweep: rows whose expiry passed more than the retention window
+     * ago (cutoff computed by {@link dev.bob.openmarket.auth.token.RefreshTokenCleanupJob}).
+     * Never touches revoked rows — those are deleted on their own clock below.
+     */
+    @Modifying
+    @Query("delete from RefreshToken t where t.expiresAt < :cutoff")
+    int deleteExpiredBefore(@Param("cutoff") Instant cutoff);
+
+    /** Cleanup sweep: rows revoked longer than the forensic retention window ago. */
+    @Modifying
+    @Query("delete from RefreshToken t where t.revokedAt is not null and t.revokedAt < :cutoff")
+    int deleteRevokedBefore(@Param("cutoff") Instant cutoff);
 }
