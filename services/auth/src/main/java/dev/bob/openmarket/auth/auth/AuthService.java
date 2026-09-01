@@ -189,6 +189,7 @@ public class AuthService {
             User user = users.findByIdAndDeletedAtIsNull(account.getUserId())
                 .orElseThrow(() -> new UnauthorizedException("account_deleted", "Account no longer exists"));
             account.setAccessToken(accessToken); // keep the provider token fresh
+            assertNotBanned(user.getId()); // a ban must also close the OAuth side door
             return AuthResult.of(user, issuePair(user, userAgent, ip));
         }
 
@@ -205,6 +206,7 @@ public class AuthService {
             // auto-link: the verified email proves it's the same person
         }
         saveDiscordAccount(user.getId(), discordUser, accessToken);
+        assertNotBanned(user.getId()); // signup (fresh user) can't be banned, but auto-link can
         return AuthResult.of(user, issuePair(user, userAgent, ip));
     }
 

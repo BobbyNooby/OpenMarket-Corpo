@@ -1,8 +1,10 @@
 package dev.bob.openmarket.auth.auth;
 
 import dev.bob.openmarket.auth.common.ConflictException;
+import dev.bob.openmarket.auth.common.ForbiddenException;
 import dev.bob.openmarket.auth.common.NotFoundException;
 import dev.bob.openmarket.auth.common.UnauthorizedException;
+import dev.bob.openmarket.auth.domain.Ban;
 import dev.bob.openmarket.auth.domain.Credential;
 import dev.bob.openmarket.auth.domain.OAuthAccount;
 import dev.bob.openmarket.auth.domain.User;
@@ -176,6 +178,45 @@ class AuthServiceDiscordTest {
             discordUser("garen@demaciabook.com", true), "at", null, null))
             .isInstanceOfSatisfying(UnauthorizedException.class,
                 e -> assertThat(e.code()).isEqualTo("account_deleted"));
+    }
+
+    @Test
+    void banned_user_with_existing_discord_link_is_refused_without_tokens() {
+        when(oauthAccounts.findByProviderAndProviderAccountId("discord", DISCORD_ID))
+            .thenReturn(Optional.of(existingDiscordAccount(TestUsers.USER_ID)));
+        when(users.findByIdAndDeletedAtIsNull(TestUsers.USER_ID))
+            .thenReturn(Optional.of(TestUsers.user()));
+        when(bans.findFirstByUserIdAndLiftedAtIsNullOrderByBannedAtDesc(TestUsers.USER_ID))
+            .thenReturn(Optional.of(activeBan()));
+
+        assertThatThrownBy(() -> service.discordLoginOrSignup(
+            discordUser("garen@demaciabook.com", true), "at", "UA", "1.2.3.4"))
+            .isInstanceOfSatisfying(ForbiddenException.class,
+                e -> assertThat(e.code()).isEqualTo("account_banned"));
+        verify(refreshTokens, never()).issue(any(), any(), any()); // no tokens for banned users
+        verify(jwt, never()).issue(any(), anyList());
+    }
+
+    @Test
+    void banned_user_on_the_autolink_path_is_refused_without_tokens() {
+        when(oauthAccounts.findByProviderAndProviderAccountId("discord", DISCORD_ID))
+            .thenReturn(Optional.empty());
+        when(users.findByEmail("garen@demaciabook.com")).thenReturn(Optional.of(TestUsers.user()));
+        when(bans.findFirstByUserIdAndLiftedAtIsNullOrderByBannedAtDesc(TestUsers.USER_ID))
+            .thenReturn(Optional.of(activeBan()));
+
+        assertThatThrownBy(() -> service.discordLoginOrSignup(
+            discordUser("garen@demaciabook.com", true), "at", null, null))
+            .isInstanceOfSatisfying(ForbiddenException.class,
+                e -> assertThat(e.code()).isEqualTo("account_banned"));
+        verify(refreshTokens, never()).issue(any(), any(), any());
+    }
+
+    private Ban activeBan() {
+        Ban ban = new Ban();
+        ban.setUserId(TestUsers.USER_ID);
+        ban.setReason("test: noxus espionage");
+        return ban;
     }
 
     // ── linkDiscord ──────────────────────────────────────────
