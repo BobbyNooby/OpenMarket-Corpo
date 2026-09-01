@@ -59,6 +59,13 @@ services:
       - "4318:4318"     # OTLP HTTP
     networks: [internal]
 
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"     # Mailpit web UI
+      - "1025:1025"     # SMTP
+    networks: [internal]
+
   # ─────────────────────────── SERVICES ───────────────────────────
 
   gateway:
@@ -87,6 +94,7 @@ services:
       DATABASE_URL: postgres://om:${POSTGRES_PASSWORD:-devpassword123}@postgres:5432/auth_db
       KAFKA_BROKERS: kafka:9092
       OTLP_ENDPOINT: http://jaeger:4318
+      MAIL_HOST: mailpit
     depends_on:
       postgres: { condition: service_healthy }
       kafka: { condition: service_healthy }
