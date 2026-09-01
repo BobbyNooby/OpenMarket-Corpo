@@ -27,6 +27,7 @@ import dev.bob.openmarket.auth.token.RefreshTokenService;
 import dev.bob.openmarket.auth.token.TokenPair;
 import dev.bob.openmarket.auth.user.UsernameDeriver;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -209,7 +210,8 @@ public class AuthService {
      * Callback resolution order: ① known Discord account → login;
      * ② verified Discord email matching an existing account → auto-link;
      * ③ otherwise create a fresh identity. Unverified/no email is refused —
-     * `users.email` is our identity anchor and must be trustworthy.
+     * `users.email` is our identity anchor and must be trustworthy. The
+     * provider access token is used transiently (fetchMe) and never persisted.
      */
     @Transactional
     public AuthResult discordLoginOrSignup(DiscordUser discordUser, String accessToken, String userAgent, String ip) {
@@ -220,7 +222,6 @@ public class AuthService {
             OAuthAccount account = existing.get();
             User user = users.findByIdAndDeletedAtIsNull(account.getUserId())
                 .orElseThrow(() -> new UnauthorizedException("account_deleted", "Account no longer exists"));
-            account.setAccessToken(accessToken); // keep the provider token fresh
             assertNotBanned(user.getId()); // a ban must also close the OAuth side door
             return AuthResult.of(user, issuePair(user, userAgent, ip));
         }
@@ -234,10 +235,13 @@ public class AuthService {
         User user = users.findByEmail(email).filter(u -> u.getDeletedAt() == null).orElse(null);
         if (user == null) {
             user = createDiscordUser(email, discordUser);
-        } else {
-            // auto-link: the verified email proves it's the same person
+        } else if (discordUser.hasVerifiedEmail() && !user.isEmailVerified()) {
+            // auto-link: the verified email proves it's the same person — and
+            // Discord's inbox proof is exactly what verifyEmail accepts
+            user.setEmailVerified(true);
+            users.save(user);
         }
-        saveDiscordAccount(user.getId(), discordUser, accessToken);
+        saveDiscordAccount(user.getId(), discordUser);
         assertNotBanned(user.getId()); // signup (fresh user) can't be banned, but auto-link can
         return AuthResult.of(user, issuePair(user, userAgent, ip));
     }
@@ -254,7 +258,7 @@ public class AuthService {
             throw new ConflictException("provider_already_linked",
                 "This Discord account is already linked to another user", null);
         }
-        saveDiscordAccount(userId, discordUser, accessToken);
+        saveDiscordAccount(userId, discordUser);
     }
 
     @Transactional
@@ -300,12 +304,11 @@ public class AuthService {
         return user;
     }
 
-    private void saveDiscordAccount(UUID userId, DiscordUser discordUser, String accessToken) {
+    private void saveDiscordAccount(UUID userId, DiscordUser discordUser) {
         OAuthAccount account = new OAuthAccount();
         account.setUserId(userId);
         account.setProvider(PROVIDER_DISCORD);
         account.setProviderAccountId(discordUser.id());
-        account.setAccessToken(accessToken);
         oauthAccounts.save(account);
     }
 

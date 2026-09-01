@@ -1,9 +1,9 @@
 package dev.bob.openmarket.auth.auth;
 
 import dev.bob.openmarket.auth.common.ConflictException;
-import dev.bob.openmarket.auth.common.RateLimiter;
 import dev.bob.openmarket.auth.common.ForbiddenException;
 import dev.bob.openmarket.auth.common.NotFoundException;
+import dev.bob.openmarket.auth.common.RateLimiter;
 import dev.bob.openmarket.auth.common.UnauthorizedException;
 import dev.bob.openmarket.auth.domain.Ban;
 import dev.bob.openmarket.auth.domain.Credential;

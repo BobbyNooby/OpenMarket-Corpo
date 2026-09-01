@@ -34,8 +34,9 @@ Consequences:
 - Adding a password later = inserting one `credentials` row.
 - "Change password" = update `credentials.password_hash` (never touches
   identity).
-- Provider tokens (Discord access/refresh) live on the `oauth_accounts` row,
-  never on the user.
+- Provider tokens (Discord access/refresh) are used transiently during the
+  OAuth callback (token exchange → `/users/@me`) and **never persisted** —
+  the `oauth_accounts` row stores only the stable identity linkage.
 
 ## All the flows
 

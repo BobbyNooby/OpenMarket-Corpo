@@ -28,15 +28,6 @@ public class OAuthAccount {
     @Column(name = "provider_account_id", nullable = false)
     private String providerAccountId;
 
-    @Column(name = "access_token")
-    private String accessToken;
-
-    @Column(name = "refresh_token")
-    private String refreshToken;
-
-    @Column(name = "token_expires_at")
-    private Instant tokenExpiresAt;
-
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -71,30 +62,6 @@ public class OAuthAccount {
 
     public void setProviderAccountId(String providerAccountId) {
         this.providerAccountId = providerAccountId;
-    }
-
-    public String getAccessToken() {
-        return accessToken;
-    }
-
-    public void setAccessToken(String accessToken) {
-        this.accessToken = accessToken;
-    }
-
-    public String getRefreshToken() {
-        return refreshToken;
-    }
-
-    public void setRefreshToken(String refreshToken) {
-        this.refreshToken = refreshToken;
-    }
-
-    public Instant getTokenExpiresAt() {
-        return tokenExpiresAt;
-    }
-
-    public void setTokenExpiresAt(Instant tokenExpiresAt) {
-        this.tokenExpiresAt = tokenExpiresAt;
     }
 
     public Instant getCreatedAt() {
