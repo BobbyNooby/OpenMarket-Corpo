@@ -106,7 +106,7 @@ class EmailFlowServiceTest {
         when(verifications.consume(eq("raw"), eq(VerificationService.TYPE_EMAIL_VERIFY), any()))
             .thenReturn(token(VerificationService.TYPE_EMAIL_VERIFY, "garen@demaciabook.com"));
         User u = user(false);
-        when(users.findById(TestUsers.USER_ID)).thenReturn(Optional.of(u));
+        when(users.findByIdAndDeletedAtIsNull(TestUsers.USER_ID)).thenReturn(Optional.of(u));
 
         service.verifyEmail("raw");
 
@@ -118,7 +118,7 @@ class EmailFlowServiceTest {
         when(verifications.consume(eq("ct"), any(), any()))
             .thenReturn(token(VerificationService.TYPE_EMAIL_CHANGE, "lux2@demaciabook.com"));
         User u = user(true);
-        when(users.findById(TestUsers.USER_ID)).thenReturn(Optional.of(u));
+        when(users.findByIdAndDeletedAtIsNull(TestUsers.USER_ID)).thenReturn(Optional.of(u));
 
         service.verifyEmail("ct");
 

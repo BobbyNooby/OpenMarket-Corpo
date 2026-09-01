@@ -79,7 +79,9 @@ public class EmailFlowService {
     public void verifyEmail(String rawToken) {
         var token = verifications.consume(rawToken,
             VerificationService.TYPE_EMAIL_VERIFY, VerificationService.TYPE_EMAIL_CHANGE);
-        User user = users.findById(token.getUserId())
+        // deletedAt-is-null-aware: a soft-deleted account must not be able to
+        // consume a token (same guard as resetPassword below).
+        User user = users.findByIdAndDeletedAtIsNull(token.getUserId())
             .orElseThrow(() -> new UnauthorizedException("invalid_token", "Unknown or already used token"));
         if (VerificationService.TYPE_EMAIL_CHANGE.equals(token.getType())) {
             // the token's identifier IS the proof of control over the new address
