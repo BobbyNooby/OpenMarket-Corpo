@@ -20,4 +20,9 @@ public interface UserRoleRepository extends JpaRepository<UserRole, UUID> {
     @Modifying(flushAutomatically = true)
     @Query("delete from UserRole u where u.userId = :userId")
     void deleteAllForUser(UUID userId);
+
+    /** Live owners across the platform — backs the first-account owner bootstrap in register. */
+    @Query("select count(r) from UserRole r where r.roleId = 'owner' "
+        + "and exists (select 1 from User u where u.id = r.userId and u.deletedAt is null)")
+    long countLiveOwners();
 }

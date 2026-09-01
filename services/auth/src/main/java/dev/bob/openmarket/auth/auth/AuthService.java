@@ -114,8 +114,11 @@ public class AuthService {
             throw new ConflictException("username_taken", "This username is already taken", "username");
         }
 
-        // bootstrap: the very first account owns the platform
-        String role = users.count() == 1 ? "owner" : DEFAULT_ROLE;
+        // bootstrap: the first LIVE account owns the platform (count excludes
+        // soft-deleted users). Not race-free — two simultaneous first signups
+        // can both see 0 and both become owner — but that only bites on an
+        // empty platform and fails safe.
+        String role = userRoles.countLiveOwners() == 0 ? "owner" : DEFAULT_ROLE;
         UserRole defaultRole = new UserRole();
         defaultRole.setUserId(user.getId());
         defaultRole.setRoleId(role);

@@ -113,6 +113,28 @@ class AuthServiceTest {
     }
 
     @Test
+    void register_first_live_user_becomes_owner() {
+        happyRegisterMocks();
+        when(userRoles.countLiveOwners()).thenReturn(0L); // no owner (soft-deleted ones don't count)
+
+        service.register(new RegisterRequest(
+            "garen@demaciabook.com", "demaciaforever222", "Garen Crownguard", null), null, null);
+
+        assertThat(savedRole().getRoleId()).isEqualTo("owner");
+    }
+
+    @Test
+    void register_with_existing_live_owners_mints_no_owner() {
+        happyRegisterMocks();
+        when(userRoles.countLiveOwners()).thenReturn(2L);
+
+        service.register(new RegisterRequest(
+            "garen@demaciabook.com", "demaciaforever222", "Garen Crownguard", null), null, null);
+
+        assertThat(savedRole().getRoleId()).isEqualTo("user");
+    }
+
+    @Test
     void register_email_unique_race_surfaces_as_email_taken_not_500() {
         happyRegisterMocks();
         when(users.save(any())).thenThrow(new DataIntegrityViolationException("uq_users_email"));
