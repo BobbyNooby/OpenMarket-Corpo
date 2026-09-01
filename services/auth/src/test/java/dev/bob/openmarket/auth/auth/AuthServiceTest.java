@@ -81,8 +81,10 @@ class AuthServiceTest {
         when(users.existsByEmail(anyString())).thenReturn(false);
         when(profiles.existsByUsername(anyString())).thenReturn(false);
         when(users.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(users.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
         when(credentials.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(profiles.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(profiles.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
         when(userRoles.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(userRoles.findRoleIdsByUserId(any())).thenReturn(List.of("user"));
         when(jwt.issue(any(), anyList())).thenReturn("access-jwt");
@@ -137,7 +139,7 @@ class AuthServiceTest {
     @Test
     void register_email_unique_race_surfaces_as_email_taken_not_500() {
         happyRegisterMocks();
-        when(users.save(any())).thenThrow(new DataIntegrityViolationException("uq_users_email"));
+        when(users.saveAndFlush(any())).thenThrow(new DataIntegrityViolationException("uq_users_email"));
 
         assertThatThrownBy(() -> service.register(
             new RegisterRequest("garen@demaciabook.com", "demaciaforever222", "G", null), null, null))
@@ -150,7 +152,7 @@ class AuthServiceTest {
     @Test
     void register_username_unique_race_surfaces_as_username_taken_not_500() {
         happyRegisterMocks();
-        when(profiles.save(any())).thenThrow(new DataIntegrityViolationException("uq_user_profiles_username"));
+        when(profiles.saveAndFlush(any())).thenThrow(new DataIntegrityViolationException("uq_user_profiles_username"));
 
         assertThatThrownBy(() -> service.register(
             new RegisterRequest("garen@demaciabook.com", "demaciaforever222", "G", null), null, null))
@@ -267,13 +269,21 @@ class AuthServiceTest {
                     e -> assertThat(e.code()).isEqualTo("invalid_credentials"));
         }
 
-        // attempt 11 is throttled — even with the CORRECT password — but must
-        // be indistinguishable from a wrong password (no account/lock leak)
-        assertThatThrownBy(() -> service.login(new LoginRequest("garen@demaciabook.com", "demaciaforever222"), null, null))
+        // attempt 11 with the WRONG password is throttled — indistinguishable
+        // from a wrong password (no account/lock leak)
+        assertThatThrownBy(() -> service.login(new LoginRequest("garen@demaciabook.com", "wrongpass2"), null, null))
             .isInstanceOfSatisfying(UnauthorizedException.class, e -> {
                 assertThat(e.code()).isEqualTo("invalid_credentials");
                 assertThat(e.getMessage()).isEqualTo("Email or password is incorrect");
             });
+
+        // but only FAILURES count: the real owner logging in with the correct
+        // password is never locked out by someone hammering their email
+        when(userRoles.findRoleIdsByUserId(TestUsers.USER_ID)).thenReturn(List.of("user"));
+        when(jwt.issue(any(), anyList())).thenReturn("access-jwt");
+        when(refreshTokens.issue(any(), any(), any())).thenReturn("refresh-raw");
+        var result = service.login(new LoginRequest("garen@demaciabook.com", "demaciaforever222"), null, null);
+        assertThat(result.accessToken()).isEqualTo("access-jwt");
     }
 
     // ── refresh / logout ─────────────────────────────────────
@@ -319,7 +329,7 @@ class AuthServiceTest {
 
     private User savedUser() {
         var c = ArgumentCaptor.forClass(User.class);
-        verify(users).save(c.capture());
+        verify(users).saveAndFlush(c.capture());
         return c.getValue();
     }
 
@@ -331,7 +341,7 @@ class AuthServiceTest {
 
     private UserProfile savedProfile() {
         var c = ArgumentCaptor.forClass(UserProfile.class);
-        verify(profiles).save(c.capture());
+        verify(profiles).saveAndFlush(c.capture());
         return c.getValue();
     }
 
