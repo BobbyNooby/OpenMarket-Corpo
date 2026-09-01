@@ -77,6 +77,34 @@ class CredentialControllerContractTest {
     }
 
     @Test
+    void add_password_over_72_utf8_bytes_returns_400_even_under_128_chars() throws Exception {
+        // 36 × "é" (2 bytes) + "a" = 73 bytes, 37 chars — passes @Size(128),
+        // must still bounce on the bcrypt boundary (@PasswordBytes)
+        String password = "é".repeat(36) + "a";
+
+        mvc.perform(post("/api/v1/auth/credentials")
+                .header(AUTH, "Bearer " + TestSecurityConfig.ANY_TOKEN)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"password\":\"" + password + "\"}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("validation_failed"))
+            .andExpect(jsonPath("$.field").value("password"));
+    }
+
+    @Test
+    void change_new_password_over_72_utf8_bytes_returns_400() throws Exception {
+        String newPassword = "é".repeat(36) + "a";
+
+        mvc.perform(patch("/api/v1/auth/credentials")
+                .header(AUTH, "Bearer " + TestSecurityConfig.ANY_TOKEN)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"currentPassword\":\"old1pass99\",\"newPassword\":\"" + newPassword + "\"}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("validation_failed"))
+            .andExpect(jsonPath("$.field").value("newPassword"));
+    }
+
+    @Test
     void change_returns_204_and_keeps_the_calling_devices_session() throws Exception {
         when(refreshTokens.familyOf(eq("raw-refresh"))).thenReturn(FAMILY);
 

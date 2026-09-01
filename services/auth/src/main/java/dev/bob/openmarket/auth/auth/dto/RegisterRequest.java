@@ -1,5 +1,6 @@
 package dev.bob.openmarket.auth.auth.dto;
 
+import dev.bob.openmarket.auth.common.PasswordBytes;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -16,6 +17,7 @@ public record RegisterRequest(
 
     @NotBlank(message = "Password is required")
     @Size(min = 8, max = 128, message = "Password must be 8-128 characters")
+    @PasswordBytes
     String password,
 
     @NotBlank(message = "Name is required")
