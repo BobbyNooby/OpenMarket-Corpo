@@ -69,8 +69,8 @@ test:
 	cd services/gateway && go test ./...
 	cd services/messaging && go test ./...
 	@echo "=== Python tests (presence + assets) ==="
-	cd services/presence && python -m pytest
-	cd services/assets && python -m pytest
+	cd services/presence && python3 -m pytest
+	cd services/assets && python3 -m pytest
 	@echo "=== Java tests (auth) ==="
 	cd services/auth && mvn -q test
 	@echo "All tests passed."
