@@ -43,7 +43,7 @@ public class AuthService {
     private static final String DUMMY_HASH = "$2a$12$Xu9fbIeitcFyMfeQDLl9Bu0FXDfgnidmgRPIeN9xEyq5TrLLx2KSi";
     private static final String DEFAULT_ROLE = "user";
     public static final String PROVIDER_DISCORD = "discord";
-    /** Login throttle: 10 attempts per 15-minute fixed window, keyed by email. */
+    /** Login throttle: 10 failed attempts per 15-minute window, keyed by email. */
     private static final int LOGIN_ATTEMPTS_LIMIT = 10;
     private static final Duration LOGIN_ATTEMPTS_WINDOW = Duration.ofMinutes(15);
 
@@ -96,8 +96,11 @@ public class AuthService {
         User user = new User();
         user.setEmail(email);
         user.setName(req.name().trim());
+        // saveAndFlush, not save: with a generated UUID the INSERT is queued
+        // until the next flush, so a plain save() would leak the unique-index
+        // violation past this catch to the generic 409 handler.
         try {
-            users.save(user);
+            users.saveAndFlush(user);
         } catch (DataIntegrityViolationException e) {
             // concurrent signup with the same email won the unique-index race
             throw new ConflictException("email_taken", "An account with this email already exists", "email");
@@ -109,7 +112,7 @@ public class AuthService {
         profile.setUserId(user.getId());
         profile.setUsername(username);
         try {
-            profiles.save(profile);
+            profiles.saveAndFlush(profile);
         } catch (DataIntegrityViolationException e) {
             // concurrent signup with the same username won the unique-index race
             throw new ConflictException("username_taken", "This username is already taken", "username");
@@ -132,16 +135,6 @@ public class AuthService {
     public AuthResult login(LoginRequest req, String userAgent, String ip) {
         String email = req.email().trim().toLowerCase();
 
-        // Per-account throttle before any password work: 10 attempts / 15 min
-        // per lowercased email, fixed window (never reset on success). Hitting
-        // the limit throws the SAME 401 as bad credentials — a distinct
-        // "locked" response would leak which emails exist or are locked.
-        try {
-            rateLimiter.allow("login", email, LOGIN_ATTEMPTS_LIMIT, LOGIN_ATTEMPTS_WINDOW);
-        } catch (RateLimitException ignored) {
-            throw new UnauthorizedException("invalid_credentials", "Email or password is incorrect");
-        }
-
         User user = users.findByEmail(email).filter(u -> u.getDeletedAt() == null).orElse(null);
         Credential credential = user != null ? credentials.findById(user.getId()).orElse(null) : null;
 
@@ -150,6 +143,16 @@ public class AuthService {
         String hash = credential != null ? credential.getPasswordHash() : DUMMY_HASH;
         boolean matches = passwordEncoder.matches(req.password(), hash);
         if (user == null || credential == null || !matches) {
+            // Count only FAILED attempts: a correct password always wins, so
+            // nobody can lock a victim out by hammering their email with junk
+            // (10 wrong guesses / 15 min per lowercased email, fixed window).
+            // The envelope stays byte-identical to a wrong password — a
+            // distinct "locked" response would leak which emails exist.
+            try {
+                rateLimiter.allow("login", email, LOGIN_ATTEMPTS_LIMIT, LOGIN_ATTEMPTS_WINDOW);
+            } catch (RateLimitException ignored) {
+                throw new UnauthorizedException("invalid_credentials", "Email or password is incorrect");
+            }
             throw new UnauthorizedException("invalid_credentials", "Email or password is incorrect");
         }
 
@@ -291,7 +294,7 @@ public class AuthService {
         profile.setUserId(user.getId());
         profile.setUsername(username);
         try {
-            profiles.save(profile);
+            profiles.saveAndFlush(profile);
         } catch (DataIntegrityViolationException e) {
             // collision loop lost the unique-index race
             throw new ConflictException("username_taken", "This username is already taken", "username");

@@ -71,7 +71,9 @@ class AuthServiceDiscordTest {
         service = new AuthService(users, profiles, credentials, oauthAccounts, userRoles, bans,
             refreshTokens, jwt, new RateLimiter(), new BCryptPasswordEncoder(10));
         when(users.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(users.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
         when(profiles.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(profiles.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
         when(oauthAccounts.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(userRoles.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(credentials.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -335,13 +337,13 @@ class AuthServiceDiscordTest {
 
     private User savedUser() {
         var c = ArgumentCaptor.forClass(User.class);
-        verify(users).save(c.capture());
+        verify(users).save(c.capture()); // createDiscordUser: INSERT flushes at the next query, plain save is fine here
         return c.getValue();
     }
 
     private UserProfile savedProfile() {
         var c = ArgumentCaptor.forClass(UserProfile.class);
-        verify(profiles).save(c.capture());
+        verify(profiles).saveAndFlush(c.capture());
         return c.getValue();
     }
 }
