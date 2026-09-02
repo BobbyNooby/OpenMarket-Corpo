@@ -14,7 +14,8 @@
 
 ```bash
 # 1. Start Postgres (required for all services)
-make postgres
+# if another project owns host port 5432 (compose reads deploy/compose/.env):
+POSTGRES_HOST_PORT=5433 make postgres  # then: POSTGRES_PORT=5433 make auth
 
 # 2. Run a service locally (pick one)
 make gateway       # Go on :3000

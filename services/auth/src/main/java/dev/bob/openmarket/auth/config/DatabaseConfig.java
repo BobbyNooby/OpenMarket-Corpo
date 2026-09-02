@@ -34,6 +34,15 @@ public class DatabaseConfig {
     @Value("${POSTGRES_PASSWORD:devpassword123}")
     private String pgPassword;
 
+    /**
+     * Explicit sslmode override. Empty (default) keeps the heuristic: remote
+     * hosts get {@code require} (Supabase et al.), localhost gets {@code
+     * disable}. Container-network hosts like compose's {@code postgres} are
+     * "remote" by the heuristic but have no TLS — set {@code disable} there.
+     */
+    @Value("${DATABASE_SSLMODE:}")
+    private String databaseSslMode;
+
     @Bean
     public DataSource dataSource() {
         HikariDataSource ds = new HikariDataSource();
@@ -57,10 +66,8 @@ public class DatabaseConfig {
     private String toJdbc(String host, int port, String db) {
         boolean remote = !(host.equals("localhost") || host.equals("127.0.0.1") || host.equals("::1"));
         String url = "jdbc:postgresql://" + host + ":" + port + "/" + db + "?currentSchema=auth";
-        if (remote) {
-            url += "&sslmode=require";
-        }
-        return url;
+        String sslMode = !databaseSslMode.isBlank() ? databaseSslMode : (remote ? "require" : "disable");
+        return url + "&sslmode=" + sslMode;
     }
 
     private static String decode(String s) {

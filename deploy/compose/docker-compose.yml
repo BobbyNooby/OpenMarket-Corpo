@@ -102,6 +102,10 @@ services:
     build:
       context: ../../services/auth
       dockerfile: Dockerfile
+      # the proto sources live outside the service dir (contracts/ is the
+      # single source of truth) — hand the build that context too
+      additional_contexts:
+        contracts: ../../contracts
     environment:
       DATABASE_URL: postgres://om:${POSTGRES_PASSWORD:-devpassword123}@postgres:5432/auth_db
       KAFKA_BROKERS: kafka:9092
@@ -116,6 +120,9 @@ services:
       GRPC_INTERNAL_SECRET: ${GRPC_INTERNAL_SECRET:-dev-internal-secret}
       # Trust X-Forwarded-For ONLY from the pinned gateway address.
       AUTH_TRUSTED_PROXY_IP: 10.200.200.10/32
+      # container-to-container Postgres has no TLS — the sslmode=require
+      # heuristic is for remote hosts like Supabase
+      DATABASE_SSLMODE: disable
     volumes: [auth-keys:/app/keys]
     depends_on:
       postgres: { condition: service_healthy }

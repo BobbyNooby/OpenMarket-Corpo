@@ -3,6 +3,10 @@ WORKDIR /src
 COPY pom.xml .
 RUN mvn dependency:go-offline -q
 COPY src ./src
+# the protobuf plugin reads ${basedir}/../../contracts/proto — in here that
+# resolves to /contracts/proto, populated from the repo's contracts/ context
+# (see compose additional_contexts)
+COPY --from=contracts . /contracts/
 RUN mvn package -DskipTests -q
 
 FROM eclipse-temurin:21-jre-jammy
