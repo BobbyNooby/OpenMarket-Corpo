@@ -1,7 +1,11 @@
 # gateway — API Gateway / BFF
 
-The **gateway** is the only public entry point for OpenMarket. The frontend
-only ever talks to this service.
+The **gateway** is the only public entry point for OpenMarket. The frontend only
+ever talks to this service.
+
+> Deep-dive docs live in [`docs/`](docs/README.md) — architecture, edge-auth
+> semantics, routing patterns, security guarantees, configuration, testing,
+> and the deferred-items roadmap.
 
 - **Stack:** Go (stdlib net/http), port 3000 — no router dependency
 - **State:** stateless; no database
