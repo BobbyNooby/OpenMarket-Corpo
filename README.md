@@ -1,5 +1,7 @@
 # openmarket-corpo
 
+![CI](https://github.com/BobbyNooby/OpenMarket-Corpo/actions/workflows/ci.yml/badge.svg)
+
 Polyglot microservices rebuild of the **OpenMarket** marketplace concept — a
 greenfield distributed-systems capstone. The product is the same (an in-game
 item trading marketplace with chat, reputation and moderation); the architecture
@@ -51,6 +53,51 @@ Cross-cutting: **Kafka** (events, KRaft) + **Schema Registry** (protobuf event
 contracts), **Redis** (presence + cache + rate-limit), **OpenTelemetry** (traces
 → Jaeger, metrics → Prometheus), **PostgreSQL 17** (one instance, one DB per
 service). Locally: Docker Compose. Stretch: Kubernetes + Strimzi.
+
+```mermaid
+graph LR
+    B["Browser · Next.js"] -->|"REST + WS"| GW
+
+    subgraph services["Services (database-per-service)"]
+        GW["Gateway · Go :3000"]
+        AUTH["Auth & Users · Java :8080"]
+        CAT["Catalogue · C# :8081"]
+        MSG["Messaging · Go :8082"]
+        PRES["Presence · Python :8083"]
+        AST["Assets · Python :8084"]
+        ADM["Admin · Java :8085"]
+    end
+
+    GW -->|"gRPC"| AUTH
+    GW -->|"gRPC"| CAT
+    GW -->|"WS / HTTP"| MSG
+    GW -->|"WS / HTTP"| PRES
+    GW -->|"HTTP"| ADM
+
+    AUTH --- P1[("auth_db")]
+    CAT --- P2[("catalogue_db")]
+    MSG --- P3[("messaging_db")]
+    PRES --- P4[("notif_db")]
+    AST --- P5[("asset_db")]
+    ADM --- P6[("admin_db")]
+
+    subgraph infra["Cross-cutting"]
+        K[(Kafka)]
+        R[(Redis)]
+        J[(Jaeger · OTel)]
+        M[(MinIO)]
+    end
+
+    AUTH & CAT & MSG & PRES & ADM -.-> K
+    PRES -.-> R
+    AST -.-> M
+    GW -.-> R
+    services -.->|"traces"| J
+```
+
+*Auth & Users is the reference implementation — deep-dive docs in
+[`services/auth/docs/`](services/auth/docs/README.md). The rest are scaffolded
+services moving down the same [roadmap](#status).*
 
 ### How services talk
 
@@ -117,16 +164,35 @@ fast-follow" that turns a demo into a credible system.
 
 ## Status
 
-Phase 0 foundations, in progress: monorepo scaffold, infra (Postgres, Kafka,
-Redis, Jaeger), and all 7 service skeletons with `/health/live` +
-`/health/ready` endpoints and Dockerfiles.
+**Phase 0 — foundations: done.** Monorepo scaffold, infra (Postgres, Kafka,
+Redis, Jaeger), all 7 service skeletons with `/health/live` + `/health/ready`
+and Dockerfiles, CI matrix across all four languages, weekly OWASP
+dependency scan.
+
+**Phase 1 — Auth & Users: the reference implementation.** Discord OAuth +
+email/password, RS256 JWT with JWKS, rotating refresh-token families with
+theft detection, RBAC (4 roles / 38 permissions), bans/warnings with rank
+guards, GDPR export/erase, email flows, session management. Shipped through a
+full OWASP-grounded security audit with every finding remediated
+(see [`services/auth/docs/security.md`](services/auth/docs/security.md)).
+
+### How it's verified
+
+| Level | What | Where |
+|-------|------|-------|
+| Unit + contract | 201 tests pinning behavior, envelopes, and security edges | `mvn test` (CI on every push) |
+| End-to-end | 108-step flow test against real Postgres + fake Discord: register → verify → OAuth → ban → roles → erase → delete | `services/auth/scripts/flow-test.sh` |
+| Container | Non-root image, persisted signing key, writable key volume | `deploy/compose` |
+| Supply chain | Weekly OWASP dependency-check (CVSS 9 gate) | CI, advisory |
+| Hygiene | `make test` / `make lint` run all four languages from one command | root `Makefile` |
 
 ### Roadmap
 
-- **Phase 0** — Contracts, Kafka, OTel baseline, 7 skeletons *(current)*
+- **Phase 0** — Contracts, Kafka, OTel baseline, 7 skeletons ✅
 - **Phase 1** — Auth (Java) + Catalogue (C#) through Gateway (Go): auth sync
   calls go internal gRPC from the start (no REST-proxy stage); catalogue stays
-  REST until its slice migrates
+  REST until its slice migrates *(auth shipped & audited; catalogue + gateway
+  proxying next)*
 - **Phase 2** — Messaging (Go) + Presence/Notifications (Python) over WS — full
   chat flow traced
 - **Phase 3** — Fill the domain: reputation, assets/images, admin/moderation,
