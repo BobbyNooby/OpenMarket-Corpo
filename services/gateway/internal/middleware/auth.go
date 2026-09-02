@@ -109,7 +109,7 @@ func Auth(introspector Introspector, timeout time.Duration, logger *slog.Logger)
 			defer cancel()
 			resp, err := introspector.IntrospectToken(ctx, &authpb.IntrospectTokenRequest{
 				AccessToken: token,
-			})
+			}, grpc.WaitForReady(true))
 			if err != nil {
 				if status.Code(err) == codes.DeadlineExceeded {
 					logger.Warn("introspection timed out", "path", r.URL.Path)
