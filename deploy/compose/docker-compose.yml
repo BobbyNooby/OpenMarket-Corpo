@@ -13,7 +13,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./init/01-create-dbs.sql:/docker-entrypoint-initdb.d/01-create-dbs.sql:ro
-    ports: ["5432:5432"]
+    ports: ["127.0.0.1:5432:5432"]  # host-local only — never expose raw Postgres
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U om"]
       interval: 5s
@@ -75,6 +75,8 @@ services:
     ports: ["3000:3000"]
     environment:
       AUTH_URL: http://auth:8080
+      # Edge authentication channel (IntrospectToken over gRPC).
+      AUTH_GRPC_URL: auth:9090
       CATALOGUE_URL: http://catalogue:8081
       MESSAGING_URL: http://messaging:8082
       PRESENCE_URL: http://presence:8083
@@ -84,7 +86,16 @@ services:
       OTLP_ENDPOINT: http://jaeger:4318
     depends_on:
       redis: { condition: service_healthy }
-    networks: [internal]
+      auth: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      internal:
+        # Pinned so auth can trust exactly this host's X-Forwarded-For.
+        ipv4_address: 172.28.0.10
 
   auth:
     build:
@@ -99,6 +110,10 @@ services:
       # auto-generate a fresh key and silently invalidate every session.
       JWT_KEY_PATH: /app/keys/jwt-rsa.jwk
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
+      # Internal gRPC (IntrospectToken) — unpublished, compose net only.
+      GRPC_SERVER_PORT: 9090
+      # Trust X-Forwarded-For ONLY from the pinned gateway address.
+      AUTH_TRUSTED_PROXY_IP: 172.28.0.10/32
     volumes: [auth-keys:/app/keys]
     depends_on:
       postgres: { condition: service_healthy }
@@ -211,3 +226,8 @@ volumes:
 networks:
   internal:
     driver: bridge
+    # Fixed subnet so AUTH_TRUSTED_PROXY_IP can pin the gateway's address —
+    # X-Forwarded-For is trusted from exactly one container, not the whole net.
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
