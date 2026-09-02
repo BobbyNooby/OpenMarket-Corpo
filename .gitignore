@@ -62,3 +62,12 @@ deploy/compose/prometheus-data/
 
 # Auth dev keys (auto-generated RSA JWK — never commit)
 services/auth/keys/
+
+# opencode (local AI config — kept out of the repo)
+.opencode/
+
+# AI/editor tooling — keep local
+.claude/
+CLAUDE.md
+AGENTS.md
+.zed/
