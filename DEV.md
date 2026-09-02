@@ -90,6 +90,16 @@ make auth           # Spring Boot
 make admin          # Spring Boot
 make catalogue      # C# ASP.NET
 make gateway        # Go
+```
+
+### Frontend dev harness
+
+`make frontend` serves Next.js on :5173. The `/dev` page is a raw API
+harness (register / login / me / refresh / logout) that exercises the full
+chain: rewrite → gateway → gRPC edge introspection → auth → Postgres.
+`/api/*` is proxied to the gateway via a Next.js rewrite, so session
+cookies stay same-origin — no CORS config exists anywhere. Chrome/Firefox
+only: Safari refuses Secure cookies on `http://localhost`.
 make messaging      # Go
 make presence       # Python FastAPI
 make assets         # Python FastAPI
