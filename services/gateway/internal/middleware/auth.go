@@ -88,6 +88,7 @@ func extractToken(r *http.Request) string {
 //   - token + introspection unavailable → 503 (fail closed on protected
 //     routes; a flaky check must never degrade into "allow")
 func Auth(introspector Introspector, timeout time.Duration, logger *slog.Logger) func(http.Handler) http.Handler {
+	cache := newIntrospectionCache(10*time.Second, 10_000)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if IsPublic(r.URL.Path) {
@@ -97,6 +98,10 @@ func Auth(introspector Introspector, timeout time.Duration, logger *slog.Logger)
 			token := extractToken(r)
 			if token == "" {
 				next.ServeHTTP(w, r)
+				return
+			}
+			if resp, ok := cache.get(token); ok {
+				serveWithIdentity(w, r, next, resp)
 				return
 			}
 
@@ -115,14 +120,21 @@ func Auth(introspector Introspector, timeout time.Duration, logger *slog.Logger)
 					"Authentication is temporarily unavailable")
 				return
 			}
-			if !resp.GetActive() {
-				httpx.Error(w, http.StatusUnauthorized, "unauthorized",
-					"A valid access token is required")
-				return
-			}
-
-			id := Identity{UserID: resp.GetUserId(), Roles: resp.GetRoles()}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, id)))
+			cache.put(token, resp)
+			serveWithIdentity(w, r, next, resp)
 		})
 	}
+}
+
+// serveWithIdentity applies the introspection verdict: inactive tokens die
+// at the edge; live ones carry their identity downstream.
+func serveWithIdentity(w http.ResponseWriter, r *http.Request, next http.Handler,
+	resp *authpb.IntrospectTokenResponse) {
+	if !resp.GetActive() {
+		httpx.Error(w, http.StatusUnauthorized, "unauthorized",
+			"A valid access token is required")
+		return
+	}
+	id := Identity{UserID: resp.GetUserId(), Roles: resp.GetRoles()}
+	next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, id)))
 }

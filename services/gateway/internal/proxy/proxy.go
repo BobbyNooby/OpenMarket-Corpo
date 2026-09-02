@@ -43,6 +43,11 @@ func New(target *url.URL, logger *slog.Logger) *httputil.ReverseProxy {
 			for _, h := range identityHeaders {
 				pr.Out.Header.Del(h)
 			}
+			// The gateway is the authority on forwarding semantics — a
+			// client-supplied Forwarded/X-Forwarded-Host would poison any
+			// future upstream that starts trusting them.
+			pr.Out.Header.Del("X-Forwarded-Host")
+			pr.Out.Header.Del("Forwarded")
 		},
 		// Stream-friendly: SSE/WebSocket-ish responses must not buffer.
 		FlushInterval: -1,

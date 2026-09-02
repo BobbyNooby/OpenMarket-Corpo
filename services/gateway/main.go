@@ -15,8 +15,6 @@ import (
 	"time"
 
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/openmarket-corpo/gateway/internal/authclient"
@@ -51,10 +49,13 @@ func main() {
 
 	authTarget := envOrDefault("AUTH_URL", "http://localhost:8080")
 	authGRPC := envOrDefault("AUTH_GRPC_URL", "localhost:9090")
+	// Guards the internal IntrospectToken hop; must match auth's
+	// GRPC_INTERNAL_SECRET. Compose passes the same value to both.
+	internalSecret := envOrDefault("GRPC_INTERNAL_SECRET", "dev-internal-secret")
 
 	// Edge authentication channel. A dead auth degrades protected routes to
 	// 503 but never takes the whole gateway down.
-	conn, err := authclient.Dial(ctx, authGRPC, 10*time.Second, logger)
+	conn, err := authclient.Dial(ctx, authGRPC, internalSecret, 10*time.Second, logger)
 	if err != nil {
 		logger.Error("auth gRPC dial failed", "err", err)
 		os.Exit(1)
@@ -83,7 +84,11 @@ func main() {
 	mux.Handle("/api/v1/presence/", stub.NotDeployed("presence"))
 	mux.Handle("/api/v1/assets/", stub.NotDeployed("assets"))
 
-	// Unknown API routes answer 404, not the root info JSON.
+	// Unknown API routes answer 404, not the root info JSON. The bare
+	// "/api" is registered too, else ServeMux 301-redirects POSTs to "/api/".
+	mux.HandleFunc("/api", func(w http.ResponseWriter, r *http.Request) {
+		httpx.Error(w, http.StatusNotFound, "not_found", "Unknown API route")
+	})
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusNotFound, "not_found", "Unknown API route")
 	})
@@ -99,7 +104,9 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
 	})
-	mux.HandleFunc("/health/system", healthSystem)
+	mux.HandleFunc("/health/system", func(w http.ResponseWriter, r *http.Request) {
+		healthSystem(healthpb.NewHealthClient(conn), internalSecret, w, r)
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
@@ -110,10 +117,16 @@ func main() {
 	})
 
 	port := envOrDefault("PORT", "3000")
+	// Body cap at the edge: proxied auth endpoints are small JSON; a flood
+	// of giant bodies must die here, not stream into upstreams.
+	root := http.MaxBytesHandler(mux, 10<<20)
 	srv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           mux,
+		Handler:           root,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		// No WriteTimeout: streaming mounts (future WS/SSE) must live.
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -134,7 +147,7 @@ func main() {
 	logger.Info("gateway stopped cleanly")
 }
 
-func healthSystem(w http.ResponseWriter, r *http.Request) {
+func healthSystem(authHealth healthpb.HealthClient, secret string, w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{Timeout: 2 * time.Second}
 	backendURLs := map[string]string{
 		"auth":      envOrDefault("AUTH_URL", "http://localhost:8080"),
@@ -170,16 +183,12 @@ func healthSystem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Edge authentication channel detail (gRPC).
-	authGRPC := envOrDefault("AUTH_GRPC_URL", "localhost:9090")
-	grpcSh := ServiceHealth{Name: "auth-grpc", URL: authGRPC, Status: "unreachable"}
-	if conn, err := grpc.NewClient(authGRPC, grpc.WithTransportCredentials(insecure.NewCredentials())); err == nil {
-		defer conn.Close()
-		cctx, cancel := context.WithTimeout(r.Context(), time.Second)
-		resp, err := healthpb.NewHealthClient(conn).Check(cctx, &healthpb.HealthCheckRequest{})
-		cancel()
-		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
-			grpcSh.Status = "healthy"
-		}
+	grpcSh := ServiceHealth{Name: "auth-grpc", Status: "unreachable"}
+	cctx, cancel := context.WithTimeout(r.Context(), time.Second)
+	resp, err := authHealth.Check(authclient.AppendSecret(cctx, secret), &healthpb.HealthCheckRequest{})
+	cancel()
+	if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
+		grpcSh.Status = "healthy"
 	}
 	if grpcSh.Status != "healthy" {
 		allHealthy = false

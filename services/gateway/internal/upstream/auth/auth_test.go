@@ -57,9 +57,10 @@ func Test_mount_covers_auth_route_families(t *testing.T) {
 			t.Fatalf("%s must proxy to auth (upstream saw %q)", path, hit)
 		}
 	}
-	// Only the two protected paths may hit the introspector.
-	if intro.calls != 2 {
-		t.Fatalf("protected paths must pass through the edge check, introspected %d", intro.calls)
+	// Two protected paths, one introspection: the second rode the TTL cache
+	// (same token) — routing AND caching verified in one pass.
+	if intro.calls != 1 {
+		t.Fatalf("protected paths must pass the edge check exactly once (cache), got %d", intro.calls)
 	}
 }
 

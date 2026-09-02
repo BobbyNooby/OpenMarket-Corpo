@@ -1,7 +1,7 @@
-FROM golang:1.23-alpine AS build
+FROM golang:1.25-alpine AS build
 RUN apk add --no-cache curl
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
 COPY . .
 RUN CGO_ENABLED=0 go build -o /app .
 
