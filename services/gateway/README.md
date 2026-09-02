@@ -36,8 +36,10 @@ cookie falls back — mirroring auth's own resolver). The middleware:
 
 `IntrospectToken` is intentionally more than a signature check: auth answers
 from the **database**, so bans and soft-deletes kill a token at the edge
-within one request instead of one access-token TTL. Auth still re-validates
-every forwarded request — the edge check is the fast no, never the only check.
+within one request instead of one access-token TTL. Verdicts are cached for
+10 seconds — a fresh ban reaches the edge within that window, and auth's
+protected routes re-validate the token cryptographically (login/refresh
+re-check bans outright).
 
 Regenerate the protobuf stubs with `contracts/generate.sh`; generated
 `.pb.go` files are committed so CI needs no protoc.
@@ -58,6 +60,7 @@ Regenerate the protobuf stubs with `contracts/generate.sh`; generated
 | `PORT` | `3000` | listen port |
 | `AUTH_URL` | `http://localhost:8080` | auth REST base |
 | `AUTH_GRPC_URL` | `localhost:9090` | auth gRPC (IntrospectToken) |
+| `GRPC_INTERNAL_SECRET` | `dev-internal-secret` | Shared secret for the introspection hop — **must match** auth's `GRPC_INTERNAL_SECRET`, else protected routes 503 |
 | `CATALOGUE_URL` … `ADMIN_URL` | localhost ports | pending services |
 
 `/health/ready` is deliberately shallow (process-up only) — auth being down

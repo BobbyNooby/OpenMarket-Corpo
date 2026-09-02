@@ -52,7 +52,8 @@ that's a fleet-wide contract, not a local knob.
 |---|---|---|---|---|
 | `AUTH_COOKIE_SECURE` | no | `true` | Sets the `Secure` flag on `om_access`/`om_refresh` (browsers then only send them over HTTPS) | Secure-by-default — browsers accept Secure cookies on `http://localhost`, so dev is unaffected and a forgotten env var in prod can't ship session cookies over plain HTTP. Set `false` only for exotic non-localhost plain-HTTP setups. Compose passes it through as `${AUTH_COOKIE_SECURE:-true}` |
 | `GRPC_SERVER_PORT` | no | `9090` | Port for the internal gRPC server (`IntrospectToken` for the gateway's edge auth). Plaintext h2c; unpublished — compose internal network only. The gateway reaches it via `AUTH_GRPC_URL`. Health: standard `grpc.health.v1`, polled by the gateway at boot |
-| `AUTH_TRUSTED_PROXY_IP` | no | *(empty)* | Already documented above — in compose this pins the gateway's fixed address (`172.28.0.10/32`) so client-IP resolution trusts exactly one container |
+| `GRPC_INTERNAL_SECRET` | no | `dev-internal-secret` | Shared secret guarding the internal `IntrospectToken` gRPC (`x-internal-secret` metadata). Must match the gateway's value — mismatches surface as 503s behind the gateway. Internal-network-only hop; TLS is a documented deferral |
+| `AUTH_TRUSTED_PROXY_IP` | no | *(empty)* | Already documented above — in compose this pins the gateway's fixed address (`10.200.200.10/32`) so client-IP resolution trusts exactly one container |
 
 ### Discord OAuth — *live (Phase C)*
 

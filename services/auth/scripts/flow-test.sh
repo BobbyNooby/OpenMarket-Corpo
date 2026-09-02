@@ -289,6 +289,8 @@ PORT=3000 AUTH_URL=http://localhost:8080 AUTH_GRPC_URL=localhost:9090 \
   "$TMP/gateway" >"$TMP/gateway.log" 2>&1 &
 GATEWAY_PID=$!
 cleanup() { kill "$APP_PID" "$GATEWAY_PID" 2>/dev/null; docker rm -f "$PG_CONTAINER" >/dev/null 2>&1; pkill -f fake-discord.py 2>/dev/null; }
+grep -q "gateway listening" "$TMP/gateway.log" || { sleep 2; grep -q "gateway listening" "$TMP/gateway.log" \
+  || { echo "gateway failed to boot (port 3000 busy?)"; tail -5 "$TMP/gateway.log"; exit 1; }; }
 for i in $(seq 1 15); do sleep 1; curl -sf -m 2 "http://localhost:3000/health/live" >/dev/null 2>&1 && break; done
 API_GW="http://localhost:3000"
 
