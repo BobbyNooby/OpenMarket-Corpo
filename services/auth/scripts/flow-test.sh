@@ -2,7 +2,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # auth flow-test — one long, comprehensive run against the LIVE service.
 #
-# Boots its own isolated stack (throwaway Postgres on :5433, fake Discord on
+# Boots its own isolated stack (throwaway Postgres on :5434, fake Discord on
 # :5399, real Spring Boot app on :8080), then walks the entire API contract
 # step by step, asserting status codes AND response bodies — the things mocks
 # can't prove: Flyway migrations, Hibernate validation, real bcrypt, real
@@ -52,12 +52,12 @@ trap cleanup EXIT
 
 echo "── booting isolated stack ──────────────────────────────────"
 docker run -d --rm --name "$PG_CONTAINER" -e POSTGRES_USER=om -e POSTGRES_PASSWORD=devpassword123 \
-  -e POSTGRES_DB=auth_db -p 5433:5432 postgres:17 >/dev/null || { echo "postgres failed"; exit 1; }
+  -e POSTGRES_DB=auth_db -p 5434:5432 postgres:17 >/dev/null || { echo "postgres failed"; exit 1; }
 python3 scripts/fake-discord.py >/dev/null 2>&1 &
 sleep 2
 
 # env for the app — MUST be set before launch
-export POSTGRES_PORT=5433
+export POSTGRES_PORT=5434
 export DISCORD_CLIENT_ID=fake-client-id
 export DISCORD_CLIENT_SECRET=fake-client-secret
 export DISCORD_AUTHORIZE_URL=http://localhost:5399/oauth2/authorize

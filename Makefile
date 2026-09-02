@@ -20,7 +20,7 @@ postgres:
 	$(COMPOSE) up -d postgres
 	@echo "Waiting for postgres..."
 	$(COMPOSE) up -d postgres --wait
-	@echo "Postgres ready on localhost:5432"
+	@echo "Postgres ready on localhost:$${POSTGRES_HOST_PORT:-5432} (compose reads deploy/compose/.env)"
 
 # ─────────────────────── DOCKER (all services) ───────────────────────
 
