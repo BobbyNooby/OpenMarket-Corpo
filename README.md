@@ -32,8 +32,8 @@ build; v2 ships its own live URL.
   database-per-service, Kafka eventing, OpenTelemetry tracing, stateless
   scaling.
 - FastAPI is the learning vehicle for Python (presence + assets skeletons pulled
-  early in Phase 0). TypeScript is confined to the SvelteKit frontend, which
-  only ever talks to the Go gateway.
+  early in Phase 0). TypeScript is confined to the Next.js frontend, which only
+  ever talks to the Go gateway.
 
 ## Architecture (database-per-service)
 
@@ -79,7 +79,7 @@ Producers/consumers and partitioning are baked into service code, so the broker
 is a blocking, decided-up-front choice. Topics include `user.created`,
 `user.banned`, `listing.created`, `listing.sold`, `listing.expired`,
 `message.created`, `review.created`, `report.created`, `report.resolved`,
-`user.deleted`. Event contracts are defined as `.proto` schemas
+`user.deleted`. Event + gRPC contracts are defined as `.proto` schemas
 (`contracts/`), with a Schema Registry as the language-neutral replacement for
 v1's compile-time type chain.
 
@@ -124,12 +124,15 @@ Redis, Jaeger), and all 7 service skeletons with `/health/live` +
 ### Roadmap
 
 - **Phase 0** — Contracts, Kafka, OTel baseline, 7 skeletons *(current)*
-- **Phase 1** — Auth (Java) + Catalogue (C#) through Gateway (Go) on REST
+- **Phase 1** — Auth (Java) + Catalogue (C#) through Gateway (Go): auth sync
+  calls go internal gRPC from the start (no REST-proxy stage); catalogue stays
+  REST until its slice migrates
 - **Phase 2** — Messaging (Go) + Presence/Notifications (Python) over WS — full
   chat flow traced
 - **Phase 3** — Fill the domain: reputation, assets/images, admin/moderation,
   GDPR saga
-- **Phase 4** — Infra fast-follow: internal gRPC, outbox relay, Schema Registry,
+- **Phase 4** — Infra fast-follow: remaining internal gRPC (catalogue + admin;
+  auth already speaks it), outbox relay, Schema Registry,
   idempotency keys, Testcontainers, MinIO, Pact, LB/replicas, PGBouncer, read
   replica, Prometheus/Grafana, Loki, CI/CD, resilience
 - **Phase 5** — Kubernetes + Strimzi (kind)
@@ -171,7 +174,7 @@ make presence      # Python FastAPI on :8083
 ├── deploy/
 │   ├── compose/       # docker-compose.yml + init SQL (6 DBs)
 │   └── k8s/           # kustomize manifests (Phase 5)
-├── frontend/          # SvelteKit app (carried from v1 patterns)
+├── frontend/          # Next.js app (v1 SvelteKit patterns, ported to React)
 ├── docs/
 │   └── ARCHITECTURE.md # detailed architecture decisions
 ├── Makefile           # one command per service / infra

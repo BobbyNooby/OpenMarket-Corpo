@@ -1,6 +1,6 @@
 .PHONY: infra-up build up down clean test lint \
        postgres auth catalogue messaging presence assets admin gateway \
-       infra-down
+       frontend infra-down
 
 COMPOSE := docker compose -f deploy/compose/docker-compose.yml
 
@@ -61,6 +61,9 @@ presence:
 
 assets:
 	cd services/assets && uvicorn main:app --reload --port 8084
+
+frontend:
+	cd frontend && npm run dev
 
 # ─────────────────────── TEST / LINT ───────────────────────
 

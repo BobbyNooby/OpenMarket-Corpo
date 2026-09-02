@@ -8,6 +8,7 @@
 - Go (for Go services)
 - Python 3.12+ (for FastAPI services)
 - .NET SDK (for C# service)
+- Node 20.9+ (for the Next.js frontend; repo uses 22 — see `frontend/.nvmrc`)
 
 ## Quick Start
 
@@ -23,6 +24,7 @@ make messaging     # Go on :8082
 make presence      # Python FastAPI on :8083
 make assets        # Python FastAPI on :8084
 make admin         # Spring Boot on :8085
+make frontend      # Next.js on :5173 (talks to the gateway on :3000)
 ```
 
 ## Architecture
@@ -91,6 +93,7 @@ make gateway        # Go
 make messaging      # Go
 make presence       # Python FastAPI
 make assets         # Python FastAPI
+make frontend       # Next.js (frontend/)
 
 # Docker (all services)
 make build          # Build all Docker images
