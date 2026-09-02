@@ -47,7 +47,7 @@ expect() { # expect <name> <python expr>  (asserts on last response body)
 API="http://localhost:8080"
 PG_CONTAINER=om-auth-flow-pg
 
-cleanup() { kill "$APP_PID" 2>/dev/null; docker rm -f "$PG_CONTAINER" >/dev/null 2>&1; pkill -f fake-discord.py 2>/dev/null; }
+cleanup() { kill "${APP_PID:-}" "${GATEWAY_PID:-}" 2>/dev/null; docker rm -f "$PG_CONTAINER" >/dev/null 2>&1; pkill -f fake-discord.py 2>/dev/null; }
 trap cleanup EXIT
 
 echo "── booting isolated stack ──────────────────────────────────"
@@ -254,6 +254,15 @@ step "PATCH roles with unknown role → 400" 400 -b "$TMP/cj-lux.txt" -X PATCH "
 step "garen re-logs in to pick up the new roles → 200" 200 -c "$TMP/cj-gd.txt" -X POST "$API/api/v1/auth/login" \
   -H 'Content-Type: application/json' -d '{"email":"garen@demaciabook.com","password":"Demacia4Ever22"}'
 step "garen (now moderator, fresh token) can list users → 200" 200 -b "$TMP/cj-gd.txt" "$API/api/v1/admin/users"
+step "register teemo → 201" 201 -c "$TMP/cj-teemo.txt" -X POST "$API/api/v1/auth/register" \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"teemo@demaciabook.com","password":"YordleSnipes99","name":"Teemo"}'
+step "login teemo → 200 (token minted BEFORE his ban)" 200 -c "$TMP/cj-teemo.txt" -X POST "$API/api/v1/auth/login" \
+  -H 'Content-Type: application/json' -d '{"email":"teemo@demaciabook.com","password":"YordleSnipes99"}'
+TEEMO_ID=$(curl -s -b "$TMP/cj-teemo.txt" "$API/api/v1/users/me" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+step "owner bans teemo → 201 Created (his token stays cryptographically valid)" 201 -b "$TMP/cj-lux.txt" \
+  -X POST "$API/api/v1/admin/users/$TEEMO_ID/ban" -H 'Content-Type: application/json' \
+  -d '{"reason":"edge propagation test"}'
 step "export garen → 200" 200 -b "$TMP/cj-lux.txt" "$API/api/v1/admin/users/$GAREN_ID/export"
 expect "export carries the auth slice" "d['user']['email']=='garen@demaciabook.com' and 'warnings' in d"
 step "register janna → 201" 201 -c "$TMP/cj-janna.txt" -X POST "$API/api/v1/auth/register" \
@@ -288,9 +297,13 @@ echo "── §14 gateway: the real entry point ──────────�
 PORT=3000 AUTH_URL=http://localhost:8080 AUTH_GRPC_URL=localhost:9090 \
   "$TMP/gateway" >"$TMP/gateway.log" 2>&1 &
 GATEWAY_PID=$!
-cleanup() { kill "$APP_PID" "$GATEWAY_PID" 2>/dev/null; docker rm -f "$PG_CONTAINER" >/dev/null 2>&1; pkill -f fake-discord.py 2>/dev/null; }
-grep -q "gateway listening" "$TMP/gateway.log" || { sleep 2; grep -q "gateway listening" "$TMP/gateway.log" \
-  || { echo "gateway failed to boot (port 3000 busy?)"; tail -5 "$TMP/gateway.log"; exit 1; }; }
+cleanup() { kill "${APP_PID:-}" 2>/dev/null; kill "${GATEWAY_PID:-}" 2>/dev/null; docker rm -f "$PG_CONTAINER" >/dev/null 2>&1; pkill -f fake-discord.py 2>/dev/null; }
+booted=""
+for i in $(seq 1 15); do
+  grep -q "gateway listening" "$TMP/gateway.log" 2>/dev/null && { booted=1; break; }
+  sleep 1
+done
+[ -n "$booted" ] || { echo "gateway failed to boot (port 3000 busy or crashed?)"; tail -5 "$TMP/gateway.log" 2>/dev/null; exit 1; }
 for i in $(seq 1 15); do sleep 1; curl -sf -m 2 "http://localhost:3000/health/live" >/dev/null 2>&1 && break; done
 API_GW="http://localhost:3000"
 
@@ -301,11 +314,11 @@ step "catalogue stub → 501 not_deployed" 501 "$API_GW/api/v1/catalogue/items"
 expect "  …named the pending service" "d['code']=='not_deployed' and 'catalogue' in d['message']"
 step "register through gateway → 201" 201 -c "$TMP/cj-gw.txt" -X POST "$API_GW/api/v1/auth/register" \
   -H 'Content-Type: application/json' \
-  -d '{"email":"teemo@demaciabook.com","password":"YordleSnipes99","name":"Teemo"}'
+  -d '{"email":"heimer@demaciabook.com","password":"PoroRocket77","name":"Heimerdinger"}'
 step "login through gateway → 200" 200 -c "$TMP/cj-gw.txt" -X POST "$API_GW/api/v1/auth/login" \
-  -H 'Content-Type: application/json' -d '{"email":"teemo@demaciabook.com","password":"YordleSnipes99"}'
+  -H 'Content-Type: application/json' -d '{"email":"heimer@demaciabook.com","password":"PoroRocket77"}'
 step "me via gateway (cookie → introspect → proxy) → 200" 200 -b "$TMP/cj-gw.txt" "$API_GW/api/v1/users/me"
-expect "  …identity round-trips" "d['email']=='teemo@demaciabook.com'"
+expect "  …identity round-trips" "d['email']=='heimer@demaciabook.com'"
 step "forged Bearer through gateway → 401 at the EDGE" 401 -H "Authorization: Bearer forged-token" "$API_GW/api/v1/users/me"
 step "spoofed X-Forwarded-For does not break the chain → 200" 200 -b "$TMP/cj-gw.txt" \
   -H "X-Forwarded-For: 6.6.6.6" "$API_GW/api/v1/users/me"
@@ -313,6 +326,12 @@ step "refresh through gateway (path-scoped cookie survives) → 200" 200 -b "$TM
   -X POST "$API_GW/api/v1/auth/refresh"
 step "me with the rotated cookie still → 200" 200 -b "$TMP/cj-gw.txt" "$API_GW/api/v1/users/me"
 step "sessions through gateway → 200" 200 -b "$TMP/cj-gw.txt" "$API_GW/api/v1/auth/sessions"
+
+# ── edge ban propagation: the one thing ONLY the edge can enforce ──
+# auth's /users/me re-validates the token cryptographically but does NOT
+# re-check bans — teemo's token is cryptographically valid (minted pre-ban),
+# so a 401 here can only come from the gateway's DB-backed introspection.
+step "banned user's pre-ban token through gateway → 401 at the edge" 401 -b "$TMP/cj-teemo.txt" "$API_GW/api/v1/users/me"
 kill "$GATEWAY_PID" 2>/dev/null
 
 echo "────────────────────────────────────────────────────────────"
