@@ -129,13 +129,28 @@ curl http://localhost:8080/actuator/health
 # Terminal 1: Postgres
 make postgres
 
-# Terminal 2: Gateway
+# Terminal 2: Auth — the gateway needs it up first (REST :8080 + gRPC :9090)
+make auth
+
+# Terminal 3: Gateway
 make gateway
 # or: cd services/gateway && go run .
 
 # Test it
 curl http://localhost:3000/
+curl http://localhost:3000/health/system   # auth-grpc should read "healthy"
 ```
+
+Defaults match auth out of the box (`AUTH_GRPC_URL=localhost:9090`,
+`GRPC_INTERNAL_SECRET=dev-internal-secret` — see the gateway README's env
+table). Two local quirks worth knowing:
+
+- **Safari + Secure cookies**: auth's cookies are Secure-by-default, and
+  Safari refuses Secure cookies on `http://localhost` — test the login flow
+  in Chrome/Firefox, or set `AUTH_COOKIE_SECURE=false`.
+- **Trusted proxy**: with `AUTH_TRUSTED_PROXY_IP` empty (the default), auth
+  trusts no `X-Forwarded-For` — rate-limit buckets key on `127.0.0.1`, which
+  is exactly right for local dev.
 
 ### Working on presence (Python)
 

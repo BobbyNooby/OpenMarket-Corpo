@@ -107,7 +107,7 @@ with language-neutral protocols:
 | Caller | Callee | Protocol | Format |
 |--------|--------|----------|--------|
 | Browser | Gateway | REST + WS | JSON |
-| Gateway | Auth / Catalogue / Admin | **gRPC** (HTTP/2) | protobuf |
+| Gateway | Auth / Catalogue / Admin | **gRPC** (HTTP/2) | protobuf — **live for auth** (`IntrospectToken`, the gateway's edge check); catalogue/admin pending |
 | Gateway | Messaging / Presence | WS / HTTP | JSON |
 | Messaging | Kafka | publish | protobuf |
 | Presence / Admin | Kafka | subscribe | protobuf |
@@ -181,7 +181,7 @@ full OWASP-grounded security audit with every finding remediated
 | Level | What | Where |
 |-------|------|-------|
 | Unit + contract | 201 tests pinning behavior, envelopes, and security edges | `mvn test` (CI on every push) |
-| End-to-end | 108-step flow test against real Postgres + fake Discord: register → verify → OAuth → ban → roles → erase → delete | `services/auth/scripts/flow-test.sh` |
+| End-to-end | 126-step flow test against real Postgres + fake Discord: register → verify → OAuth → ban → roles → erase → delete — §14 runs the last steps **through the gateway** | `services/auth/scripts/flow-test.sh` |
 | Container | Non-root image, persisted signing key, writable key volume | `deploy/compose` |
 | Supply chain | Weekly OWASP dependency-check (CVSS 9 gate) | CI, advisory |
 | Hygiene | `make test` / `make lint` run all four languages from one command | root `Makefile` |
@@ -191,8 +191,9 @@ full OWASP-grounded security audit with every finding remediated
 - **Phase 0** — Contracts, Kafka, OTel baseline, 7 skeletons ✅
 - **Phase 1** — Auth (Java) + Catalogue (C#) through Gateway (Go): auth sync
   calls go internal gRPC from the start (no REST-proxy stage); catalogue stays
-  REST until its slice migrates *(auth shipped & audited; catalogue + gateway
-  proxying next)*
+  REST until its slice migrates *(auth shipped & audited; **gateway live** —
+  REST proxying + gRPC edge auth, see [gateway README](services/gateway/README.md);
+  catalogue next)*
 - **Phase 2** — Messaging (Go) + Presence/Notifications (Python) over WS — full
   chat flow traced
 - **Phase 3** — Fill the domain: reputation, assets/images, admin/moderation,

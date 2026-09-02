@@ -9,6 +9,7 @@ The defensive posture: what protects what, and the known gaps.
 - [Password handling](#password-handling)
 - [Cookie posture](#cookie-posture)
 - [CSRF stance](#csrf-stance)
+- [Internal gRPC API](#internal-grpc-api)
 - [Recovery & revocation story](#recovery--revocation-story)
 - [Known gaps / future work](#known-gaps--future-work)
 
@@ -69,6 +70,28 @@ CSRF protection is **disabled** on this service, deliberately:
   neutralizes the classic cross-site form POST for it.
 - Revisit when the gateway ships its own cookie-handling: it will need a
   CSRF story for the cookie-carrying mutations it terminates.
+
+## Internal gRPC API
+
+The gateway edge-authenticates against this service over gRPC
+(`IntrospectToken`, port `9090`, unpublished — compose internal network only).
+
+- **More than a signature check**: the answer comes from the database —
+  soft-deleted or banned accounts report `active=false` even while their
+  token is cryptographically valid. Signature validation cannot see bans;
+  this RPC exists so the gateway can.
+- **Secret-guarded**: every call must carry `x-internal-secret`
+  (`GRPC_INTERNAL_SECRET`, constant-time compare). The endpoint is an
+  unauthenticated-by-design oracle; its guards are the shared secret plus
+  the unpublished internal network. TLS/mTLS is a documented deferral.
+- **Bounded**: fixed 32-thread executor, 64 KiB inbound message cap — a DB
+  stall spawns no threads and garbage bodies die at the frame.
+- **Known window**: the gateway caches verdicts for 10s, so a fresh ban
+  reaches the edge within that TTL (and is enforced outright at
+  login/refresh). Pinned end-to-end by flow-test §14 — removing the edge
+  middleware turns that section red.
+
+---
 
 ## Recovery & revocation story
 
