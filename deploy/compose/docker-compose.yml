@@ -13,7 +13,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./init/01-create-dbs.sql:/docker-entrypoint-initdb.d/01-create-dbs.sql:ro
-    ports: ["127.0.0.1:5432:5432"]  # host-local only — never expose raw Postgres
+    ports: ["127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"]  # host-local only — never expose raw Postgres; override the host side when another project owns 5432
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U om"]
       interval: 5s
