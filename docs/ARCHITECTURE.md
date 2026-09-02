@@ -40,6 +40,28 @@ same as v1; v2 is a greenfield rebuild whose point is the architecture.
 | Presence / Admin / Auth | Kafka | subscribe | protobuf | Projections, side effects |
 | All services | Docker / K8s | HTTP | — | Liveness/readiness probes stay HTTP |
 
+### Protocol selection rule (the "why" behind the table)
+
+The consumer picks the protocol. Every interaction is one of four shapes,
+and each shape has exactly one right tool — protobuf is the data language
+everywhere, but the transport varies:
+
+| Interaction shape | Tool | Why |
+|---|---|---|
+| Sync request/response, machine → machine | **gRPC** | typed contract, compile-time drift detection, hot path |
+| Async fire-and-forget domain facts | **Kafka + protobuf** | gRPC is request/response and can't be fire-and-forget; events decouple availability |
+| Browser real-time | **WebSocket** | browsers can't speak gRPC; sessions are cookies |
+| Large binary blobs | **HTTP multipart → MinIO** | message-size caps and chunking buy nothing here |
+
+**The coupling warning**: every sync gRPC call is an availability coupling —
+if the callee is down, the caller fails. This architecture deliberately
+prefers events (local projections, eventual consistency, idempotent
+consumers), so sync calls are the exception, not the default. Before adding
+a service→service gRPC call, apply the discipline test: *"does the caller
+need a **fresh** answer, or would the JWT plus an event projection do?"*
+Catalogue asking auth "does this user exist?" is the canonical ❌ — the JWT
+already proves existence, and `user.deleted` events handle revocation.
+
 ## Event topics
 
 `user.created`, `user.profile.updated`, `user.banned`, `listing.created`,
