@@ -280,6 +280,39 @@ step "login after soft delete → 401" 401 -X POST "$API/api/v1/auth/login" \
 step "me after delete → 404 user_not_found (token still parses, identity is gone)" 404 -b "$TMP/cj-lux.txt" "$API/api/v1/users/me"
 expect "  …and it is the user_not_found code" "d['code']=='user_not_found'"
 
+echo "── §14 gateway: the real entry point ───────────────────────"
+# The frontend never talks to :8080 — everything rides the gateway, which
+# edge-authenticates via the IntrospectToken gRPC and proxies REST to auth.
+# This section IS the first protobuf integration test.
+(cd ../gateway && go build -o "$TMP/gateway" .) || { echo "gateway build failed"; exit 1; }
+PORT=3000 AUTH_URL=http://localhost:8080 AUTH_GRPC_URL=localhost:9090 \
+  "$TMP/gateway" >"$TMP/gateway.log" 2>&1 &
+GATEWAY_PID=$!
+cleanup() { kill "$APP_PID" "$GATEWAY_PID" 2>/dev/null; docker rm -f "$PG_CONTAINER" >/dev/null 2>&1; pkill -f fake-discord.py 2>/dev/null; }
+for i in $(seq 1 15); do sleep 1; curl -sf -m 2 "http://localhost:3000/health/live" >/dev/null 2>&1 && break; done
+API_GW="http://localhost:3000"
+
+step "gateway health/live → 200" 200 "$API_GW/health/live"
+step "unknown /api route → 404 (not the root info JSON)" 404 "$API_GW/api/v1/definitely-not-a-thing"
+expect "  …with the not_found code" "d['code']=='not_found'"
+step "catalogue stub → 501 not_deployed" 501 "$API_GW/api/v1/catalogue/items"
+expect "  …named the pending service" "d['code']=='not_deployed' and 'catalogue' in d['message']"
+step "register through gateway → 201" 201 -c "$TMP/cj-gw.txt" -X POST "$API_GW/api/v1/auth/register" \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"teemo@demaciabook.com","password":"YordleSnipes99","name":"Teemo"}'
+step "login through gateway → 200" 200 -c "$TMP/cj-gw.txt" -X POST "$API_GW/api/v1/auth/login" \
+  -H 'Content-Type: application/json' -d '{"email":"teemo@demaciabook.com","password":"YordleSnipes99"}'
+step "me via gateway (cookie → introspect → proxy) → 200" 200 -b "$TMP/cj-gw.txt" "$API_GW/api/v1/users/me"
+expect "  …identity round-trips" "d['email']=='teemo@demaciabook.com'"
+step "forged Bearer through gateway → 401 at the EDGE" 401 -H "Authorization: Bearer forged-token" "$API_GW/api/v1/users/me"
+step "spoofed X-Forwarded-For does not break the chain → 200" 200 -b "$TMP/cj-gw.txt" \
+  -H "X-Forwarded-For: 6.6.6.6" "$API_GW/api/v1/users/me"
+step "refresh through gateway (path-scoped cookie survives) → 200" 200 -b "$TMP/cj-gw.txt" -c "$TMP/cj-gw.txt" \
+  -X POST "$API_GW/api/v1/auth/refresh"
+step "me with the rotated cookie still → 200" 200 -b "$TMP/cj-gw.txt" "$API_GW/api/v1/users/me"
+step "sessions through gateway → 200" 200 -b "$TMP/cj-gw.txt" "$API_GW/api/v1/auth/sessions"
+kill "$GATEWAY_PID" 2>/dev/null
+
 echo "────────────────────────────────────────────────────────────"
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

@@ -30,6 +30,12 @@ management:
 server:
   port: 8080
 
+grpc:
+  server:
+    # Internal IntrospectToken API for the gateway. Never published outside
+    # the compose internal network; plaintext h2c (TLS deferred, documented).
+    port: ${GRPC_SERVER_PORT:9090}
+
 jwt:
   issuer: auth
   audience: openmarket
