@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package openmarket.auth.v1;
+
+// Go: generated into the gateway module (see contracts/generate.sh).
+option go_package = "github.com/openmarket-corpo/gateway/internal/authpb;authpb";
+
+// Java: generated into the auth service.
+option java_multiple_files = true;
+option java_package = "dev.bob.openmarket.auth.grpc.v1";
+option java_outer_classname = "AuthServiceProto";
+
+// Internal identity lookups for the gateway's BFF aggregation.
+// Auth owns the data; the gateway borrows it per request, never stores it.
+service AuthService {
+  // Resolve a user by id — the gateway's /api/v1/me and future aggregations
+  // start here. Unknown or soft-deleted users return NOT_FOUND.
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+
+  // Validate an access token for the gateway's auth middleware. Returns the
+  // token's validity AND the account's live state — soft-deleted or banned
+  // accounts report active=false even while their token is cryptographically
+  // valid (the gateway must never wave through a revoked identity). Invalid,
+  // expired or malformed tokens also report active=false; infrastructure
+  // failures surface as gRPC Unavailable instead, so callers can 503 rather
+  // than 401. Auth re-validates the token downstream regardless — this is
+  // the edge check, not the only one.
+  rpc IntrospectToken(IntrospectTokenRequest) returns (IntrospectTokenResponse);
+}
+
+message GetUserRequest {
+  // UUID of the user (the JWT `sub` claim).
+  string user_id = 1;
+}
+
+message GetUserResponse {
+  string id = 1;
+  string email = 2;
+  string name = 3;
+  bool email_verified = 4;
+  // Role ids (user, moderator, admin, owner) — mirrors the JWT `roles` claim.
+  repeated string roles = 5;
+}
+
+message IntrospectTokenRequest {
+  // Raw access token (JWT) exactly as presented by the client.
+  string access_token = 1;
+}
+
+message IntrospectTokenResponse {
+  // True only when the token is cryptographically valid AND the account is
+  // live (not soft-deleted) AND not under an active ban.
+  bool active = 1;
+  // UUID from the JWT `sub` claim; empty when active=false.
+  string user_id = 2;
+  // Live role ids from the database — fresher than the JWT `roles` claim,
+  // which can be up to one access-token TTL stale.
+  repeated string roles = 3;
+}
