@@ -31,6 +31,12 @@ Shipped (see `Endpoints/` — all under `/api/v1/catalogue`):
   *Design decision:* v1 let sellers pick a buyer from chat contacts — v2 is
   first-come-first-served by choice; revisit only with a
   pending-accept→confirm state machine, not casually.
+  *Known bounded race:* a seller PATCH committing in the narrow window
+  between accept's snapshot-read and its status flip can leave the frozen
+  snapshot on pre-edit terms while the sold row shows post-edit terms.
+  Bounded on purpose: both actions are the seller's own and the snapshot
+  remains the system of record — the xmin token guards the dangerous
+  direction (stale editor vs sold listing), not this one.
 - **Idempotency:** `Idempotency-Key` header (≤100 chars). Create: same key +
   same body → 200 replay; same key + different body → 409
   `idempotency_key_reused`. Accept: keyless accepts synthesize a deterministic

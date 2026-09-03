@@ -544,26 +544,22 @@ public class SecurityAndFlowTests(CatalogueFixture fx, ITestOutputHelper output)
         var coin = await AdminCreateCurrency("Stale Patch Coin");
         var listingId = await CreateListing("stale-patch-seller", coin);
 
-        // simulate the accept winning in between: flip the row out-of-band
+        // HTTP-level interleaving can't place the accept between the PATCH's
+        // load and save, so pin the xmin token at the persistence layer:
+        // tracked load → out-of-band flip → stale SaveChanges must conflict
         using (var scope = fx.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<CatalogueDbContext>();
+            var listing = await db.Listings.FirstAsync(l => l.Id == listingId);
+            listing.Amount = 99; // the stale editor's intent
+
             await db.Listings.Where(l => l.Id == listingId)
                 .ExecuteUpdateAsync(s => s.SetProperty(l => l.Status, ListingStatus.Sold));
+
+            await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => db.SaveChangesAsync());
         }
 
-        // a PATCH loaded before the sale must NOT silently rewrite the sold
-        // listing behind the frozen trade snapshot
-        var stale = NewClient("stale-patch-seller", roles: ["user"]);
-        var patch = await stale.PatchAsJsonAsync($"/api/v1/catalogue/listings/{listingId}", new
-        {
-            amount = 99,
-            requestedCurrencyId = coin,
-            offered = new[] { new { kind = "currency", id = coin, amount = 1 } },
-        });
-        Assert.Equal(HttpStatusCode.Conflict, patch.StatusCode);
-
-        // the sold terms are intact
+        // the sold terms are intact — the stale write never landed
         var get = await Anonymous().GetAsync($"/api/v1/catalogue/listings/{listingId}");
         var body = await get.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(1, body.GetProperty("amount").GetInt32());
@@ -586,7 +582,7 @@ public class SecurityAndFlowTests(CatalogueFixture fx, ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task create_replay_with_garbage_order_type_is_400_not_500()
+    public async Task create_replay_with_garbage_order_type_conflicts_409()
     {
         var coin = await AdminCreateCurrency("Garbage Enum Coin");
         var client = NewClient("garbage-enum-user", roles: ["user"]);
@@ -600,7 +596,8 @@ public class SecurityAndFlowTests(CatalogueFixture fx, ITestOutputHelper output)
         }, "garbage-key");
         Assert.Equal(HttpStatusCode.Created, first.StatusCode);
 
-        // validation must reject this BEFORE the replay comparison parses it
+        // replay-first: the parse-safe comparison runs before validation, so a
+        // garbage enum on an existing key is a MISMATCH (409), not a parse 500
         var replay = await client.PostJsonWithKey("/api/v1/catalogue/listings", new
         {
             requestedCurrencyId = coin,
@@ -609,7 +606,7 @@ public class SecurityAndFlowTests(CatalogueFixture fx, ITestOutputHelper output)
             payingType = "each",
             offered = new[] { new { kind = "currency", id = coin, amount = 1 } },
         }, "garbage-key");
-        Assert.Equal(HttpStatusCode.BadRequest, replay.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, replay.StatusCode);
     }
 
     [Fact]
@@ -624,6 +621,24 @@ public class SecurityAndFlowTests(CatalogueFixture fx, ITestOutputHelper output)
             orderType = "sell",
             payingType = "each",
             expiresAt = "2030-01-01T00:00:00", // no offset → Unspecified kind
+            offered = new[] { new { kind = "currency", id = coin, amount = 1 } },
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task expires_at_with_explicit_offset_is_400_not_500()
+    {
+        // an offset-carrying string binds as Kind=Local — also un-storable
+        var coin = await AdminCreateCurrency("Offset Time Coin");
+        var client = NewClient("offset-time-user", roles: ["user"]);
+        var res = await client.PostAsJsonAsync("/api/v1/catalogue/listings", new
+        {
+            requestedCurrencyId = coin,
+            amount = 1,
+            orderType = "sell",
+            payingType = "each",
+            expiresAt = "2030-01-01T00:00:00+02:00",
             offered = new[] { new { kind = "currency", id = coin, amount = 1 } },
         });
         Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);

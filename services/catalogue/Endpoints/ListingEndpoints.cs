@@ -112,18 +112,10 @@ public static class ListingEndpoints
             if (idemKey.Length > 100)
                 return Envelope.Error(400, "validation_failed", "Idempotency-Key too long", "Idempotency-Key");
 
-            // per-author cap: listings are the cheap raw material of the outbox
-            // — uncapped, one account loops create/PATCH and floods readiness
-            const int MaxListingsPerAuthor = 200;
-            if (await db.Listings.CountAsync(l => l.AuthorId == authorId) >= MaxListingsPerAuthor)
-                return Envelope.Error(409, "listing_cap_reached",
-                    $"At most {MaxListingsPerAuthor} active-or-historical listings per author");
-
-            // validate BEFORE the replay check: garbage enums answer 400, and a
-            // genuine replay passes validation unchanged
-            if (await ValidateAsync(db, body.Amount, body.OrderType, body.PayingType, body.ExpiresAt, body.Offered,
-                    body.RequestedItemId, body.RequestedCurrencyId) is { } verr) return verr;
-
+            // replay-first: same key + same intent replays even if catalog
+            // state has since drifted (item retired, expiry passed, cap now
+            // full) — validation and caps govern NEW listings only. Parse-
+            // safe: a garbage enum string can't throw, it's just a mismatch.
             if (idemKey.Length > 0)
             {
                 var existing = await db.Listings.AsNoTracking()
@@ -137,8 +129,8 @@ public static class ListingEndpoints
                         && existing.RequestedItemId == body.RequestedItemId
                         && existing.RequestedCurrencyId == body.RequestedCurrencyId
                         && SameExpiry(existing.ExpiresAt, body.ExpiresAt)
-                        && existing.OrderType == (OrderType)System.Enum.Parse(typeof(OrderType), body.OrderType, ignoreCase: true)
-                        && existing.PayingType == (PayingType)System.Enum.Parse(typeof(PayingType), body.PayingType, ignoreCase: true)
+                        && SameEnum(existing.OrderType, body.OrderType)
+                        && SameEnum(existing.PayingType, body.PayingType)
                         && SameLines(existing, body.Offered);
                     if (!sameBody)
                         return Envelope.Error(409, "idempotency_key_reused",
@@ -146,6 +138,18 @@ public static class ListingEndpoints
                     return Results.Json(new { replay = true, listingId = existing.Id }, statusCode: 200);
                 }
             }
+
+            // per-author cap: listings are the cheap raw material of the outbox
+            // — uncapped, one account loops create/PATCH and floods readiness.
+            // Deliberately AFTER the replay check: retrying a successful create
+            // at cap replays, it doesn't 409.
+            const int MaxListingsPerAuthor = 200;
+            if (await db.Listings.CountAsync(l => l.AuthorId == authorId) >= MaxListingsPerAuthor)
+                return Envelope.Error(409, "listing_cap_reached",
+                    $"At most {MaxListingsPerAuthor} active-or-historical listings per author");
+
+            if (await ValidateAsync(db, body.Amount, body.OrderType, body.PayingType, body.ExpiresAt, body.Offered,
+                    body.RequestedItemId, body.RequestedCurrencyId) is { } verr) return verr;
 
             var listing = new Listing
             {
@@ -457,11 +461,12 @@ public static class ListingEndpoints
                 "A listing requests exactly one of: item or currency", "requestedItemId");
         if (expiresAt is { } exp)
         {
-            // no timezone offset binds as Unspecified — Npgsql rejects it on
-            // write with a 500; make it an honest 400 instead
-            if (exp.Kind == DateTimeKind.Unspecified)
+            // only true UTC instants are storable: offset-less strings bind as
+            // Unspecified and offset-carrying ones as Local — Npgsql 500s on
+            // both at write time, so make it an honest 400 here
+            if (exp.Kind is not DateTimeKind.Utc)
                 return Envelope.Error(400, "validation_failed",
-                    "expiresAt must include a timezone offset", "expiresAt");
+                    "expiresAt must be a UTC instant (Z or explicit offset)", "expiresAt");
             if (exp <= DateTime.UtcNow)
                 return Envelope.Error(400, "validation_failed", "expiresAt must be in the future", "expiresAt");
             // per request, never a static: a process-lifetime horizon silently
@@ -591,6 +596,9 @@ public static class ListingEndpoints
                    pair.First.Item1 == pair.Second.Kind && pair.First.Item2 == pair.Second.Id &&
                    pair.First.Item3 == pair.Second.Amount);
     }
+
+    private static bool SameEnum<TEnum>(TEnum stored, string raw) where TEnum : struct, Enum =>
+        System.Enum.TryParse<TEnum>(raw, ignoreCase: true, out var parsed) && parsed.Equals(stored);
 
     private static bool SameExpiry(DateTime? stored, DateTime? incoming) =>
         stored is null && incoming is null

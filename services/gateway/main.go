@@ -165,6 +165,9 @@ func healthSystem(authHealth healthpb.HealthClient, secret string, w http.Respon
 	results := make([]ServiceHealth, 0, len(names)+1)
 
 	allHealthy := true
+	// Deployed services must be healthy for the overall report; pending
+	// ones are expected to be unreachable and must not degrade it.
+	deployed := map[string]bool{"auth": true, "catalogue": true, "admin": true}
 	for _, name := range names {
 		sh := ServiceHealth{Name: name, URL: backendURLs[name]}
 		resp, err := client.Get(backendURLs[name] + "/health/ready")
@@ -178,9 +181,6 @@ func healthSystem(authHealth healthpb.HealthClient, secret string, w http.Respon
 				sh.Status = "degraded"
 			}
 		}
-		// Deployed services must be healthy for the overall report; pending
-		// ones are expected to be unreachable and must not degrade it.
-		deployed := map[string]bool{"auth": true, "catalogue": true}
 		if sh.Status != "healthy" && deployed[name] {
 			allHealthy = false
 		}
