@@ -10,9 +10,19 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"time"
 
 	"github.com/openmarket-corpo/gateway/internal/httpx"
 )
+
+// UpstreamHeaderTimeout bounds time-to-first-response-header on proxied
+// calls. Without it, an upstream that accepts TCP but stalls before headers
+// holds the gateway connection and goroutine forever (zero-value Transport
+// = unlimited wait, and the server deliberately has no WriteTimeout so
+// streaming can live). Safe for SSE/WS: those send headers immediately;
+// after headers land this timeout no longer applies and streaming is
+// unbounded. Package var so tests can shrink it.
+var UpstreamHeaderTimeout = 30 * time.Second
 
 // identityHeaders are dropped from every inbound request. Nothing behind
 // the gateway mints or trusts them today, but if a future service starts
@@ -24,7 +34,10 @@ var identityHeaders = []string{"X-User-Id", "X-Roles", "X-Email", "X-User-Roles"
 // default would append to a client-supplied value, letting anyone forge the
 // first entry and poison downstream client-IP resolution.
 func New(target *url.URL, logger *slog.Logger) *httputil.ReverseProxy {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = UpstreamHeaderTimeout
 	p := &httputil.ReverseProxy{
+		Transport: transport,
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
 

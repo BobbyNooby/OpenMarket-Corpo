@@ -59,11 +59,10 @@ var publicExact = map[string]bool{
 }
 
 // IsPublic reports whether the path is anonymous-accessible at the edge.
+// Exact-match only: a prefix rule here would silently exempt the first
+// future mount under that prefix from ban enforcement.
 func IsPublic(path string) bool {
-	if publicExact[path] {
-		return true
-	}
-	return strings.HasPrefix(path, "/.well-known/")
+	return publicExact[path]
 }
 
 // extractToken mirrors the auth service's rule: Authorization header wins,
@@ -107,9 +106,14 @@ func Auth(introspector Introspector, timeout time.Duration, logger *slog.Logger)
 
 			ctx, cancel := context.WithTimeout(r.Context(), timeout)
 			defer cancel()
+			// Fail-fast, deliberately NO WaitForReady: during an auth outage
+			// the channel sits in TRANSIENT_FAILURE and WaitForReady would
+			// park every uncached request for the full deadline — a pileup,
+			// not the documented fast-503 posture. Blip absorption is the
+			// verdict cache's job, not the call's.
 			resp, err := introspector.IntrospectToken(ctx, &authpb.IntrospectTokenRequest{
 				AccessToken: token,
-			}, grpc.WaitForReady(true))
+			})
 			if err != nil {
 				if status.Code(err) == codes.DeadlineExceeded {
 					logger.Warn("introspection timed out", "path", r.URL.Path)

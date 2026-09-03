@@ -14,14 +14,11 @@ import (
 	"github.com/openmarket-corpo/gateway/internal/proxy"
 )
 
-// Mount registers catalogue's routes. Returns the proxy so /health/system
-// could reuse it if needed.
-func Mount(mux *http.ServeMux, targetURL string, logger *slog.Logger) *httputil.ReverseProxy {
-	target, err := url.Parse(targetURL)
-	if err != nil {
-		logger.Error("bad catalogue URL", "url", targetURL, "err", err)
-		return nil
-	}
+// Mount registers catalogue's routes. Panics-free fail-fast is the caller's
+// job: a malformed target is a boot-time configuration error (mirrors how
+// main treats AUTH_URL). Returns the proxy so /health/system could reuse it
+// if needed.
+func Mount(mux *http.ServeMux, target *url.URL, logger *slog.Logger) *httputil.ReverseProxy {
 	p := proxy.New(target, logger)
 	mux.Handle("/api/v1/catalogue/", p)
 	mux.Handle("/api/v1/catalogue", p) // bare prefix — truthful upstream 404

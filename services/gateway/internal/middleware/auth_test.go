@@ -181,6 +181,12 @@ func Test_exact_public_matching_does_not_leak_into_subpaths(t *testing.T) {
 	if IsPublic("/api/v1/auth/login/resend") {
 		t.Fatal("subpaths of public routes must not be public")
 	}
+	if IsPublic("/.well-known/anything-else") {
+		t.Fatal("the jwks entry must be exact-match, never a /.well-known/ prefix rule")
+	}
+	if !IsPublic("/.well-known/jwks.json") {
+		t.Fatal("exact public route must match")
+	}
 	if !IsPublic("/api/v1/auth/login") {
 		t.Fatal("exact public route must match")
 	}

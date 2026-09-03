@@ -64,7 +64,7 @@ func Test_mount_covers_auth_route_families(t *testing.T) {
 	}
 }
 
-func Test_stubbed_services_cannot_shadow_auth(t *testing.T) {
+func Test_pending_stub_mounts_leave_auth_routes_intact(t *testing.T) {
 	mux := http.NewServeMux()
 	var hit string
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -74,13 +74,21 @@ func Test_stubbed_services_cannot_shadow_auth(t *testing.T) {
 	defer up.Close()
 	target, _ := url.Parse(up.URL)
 	Mount(mux, Config{Target: target, Introspector: &alwaysActive{}, IntrospectTimeout: time.Second, Logger: testLogger()})
-	// The composition root also mounts the pending-service stubs — mirror
-	// that so we test the real routing table.
-	mux.Handle("/api/v1/catalogue/", stub.NotDeployed("catalogue"))
+	// The composition root also mounts other upstreams and pending-service
+	// stubs — different prefixes must not interfere with auth's routes.
+	mux.Handle("/api/v1/messaging/", stub.NotDeployed("messaging"))
 
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/catalogue/items", nil))
-	if rec.Code != http.StatusNotImplemented || hit != "" {
-		t.Fatalf("catalogue route must stay a stub (code=%d upstream=%q)", rec.Code, hit)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/me", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || hit != "/api/v1/users/me" {
+		t.Fatalf("auth route must reach auth upstream beside other mounts (code=%d upstream=%q)", rec.Code, hit)
+	}
+
+	stubRec := httptest.NewRecorder()
+	mux.ServeHTTP(stubRec, httptest.NewRequest(http.MethodGet, "/api/v1/messaging/x", nil))
+	if stubRec.Code != http.StatusNotImplemented {
+		t.Fatalf("stub prefix must still answer 501 (got %d)", stubRec.Code)
 	}
 }

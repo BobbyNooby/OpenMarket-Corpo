@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -19,6 +20,8 @@ import (
 
 	"github.com/openmarket-corpo/gateway/internal/authclient"
 	authpb "github.com/openmarket-corpo/gateway/internal/authpb"
+	"google.golang.org/grpc"
+
 	"github.com/openmarket-corpo/gateway/internal/httpx"
 	"github.com/openmarket-corpo/gateway/internal/upstream/auth"
 	"github.com/openmarket-corpo/gateway/internal/upstream/catalogue"
@@ -35,12 +38,145 @@ func envOrDefault(key, fallback string) string {
 type ServiceHealth struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
-	URL    string `json:"url"`
+	// Deliberately no URL: /health/system is publicly reachable and must not
+	// hand anonymous callers the internal service topology.
 }
 
 type HealthResponse struct {
 	Status   string          `json:"status"`
 	Services []ServiceHealth `json:"services"`
+}
+
+// healthChecker is the slice of the gRPC health client the prober needs —
+// tests substitute a fake instead of dialing a real channel.
+type healthChecker interface {
+	Check(ctx context.Context, in *healthpb.HealthCheckRequest,
+		opts ...grpc.CallOption) (*healthpb.HealthCheckResponse, error)
+}
+
+// systemProber answers /health/system. Probes run in parallel (bounded ~1s
+// overall) and the result is snapshotted for healthSnapshotTTL: monitors
+// polling this route collapse to one probe round per TTL instead of
+// amplifying into an internal probe flood per request.
+type systemProber struct {
+	urls       map[string]string
+	names      []string
+	deployed   map[string]bool
+	authHealth healthChecker
+	secret     string
+	client     *http.Client
+
+	mu     sync.Mutex
+	cached HealthResponse
+	code   int
+	at     time.Time
+}
+
+const healthSnapshotTTL = 5 * time.Second
+
+func newSystemProber(authHealth healthChecker, secret string) *systemProber {
+	return &systemProber{
+		urls: map[string]string{
+			"auth":      envOrDefault("AUTH_URL", "http://localhost:8080"),
+			"catalogue": envOrDefault("CATALOGUE_URL", "http://localhost:8081"),
+			"messaging": envOrDefault("MESSAGING_URL", "http://localhost:8082"),
+			"presence":  envOrDefault("PRESENCE_URL", "http://localhost:8083"),
+			"assets":    envOrDefault("ASSETS_URL", "http://localhost:8084"),
+			"admin":     envOrDefault("ADMIN_URL", "http://localhost:8085"),
+		},
+		names:      []string{"auth", "catalogue", "messaging", "presence", "assets", "admin"},
+		deployed:   map[string]bool{"auth": true, "catalogue": true, "admin": true},
+		authHealth: authHealth,
+		secret:     secret,
+		client:     &http.Client{Timeout: 2 * time.Second},
+		code:       http.StatusServiceUnavailable,
+		cached:     HealthResponse{Status: "degraded", Services: []ServiceHealth{}},
+	}
+}
+
+func (s *systemProber) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if time.Since(s.at) < healthSnapshotTTL {
+		writeHealth(w, s.code, s.cached)
+		return
+	}
+	s.cached, s.code = s.probe(r)
+	s.at = time.Now()
+	writeHealth(w, s.code, s.cached)
+}
+
+func writeHealth(w http.ResponseWriter, code int, hr HealthResponse) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(hr)
+}
+
+func (s *systemProber) probe(r *http.Request) (HealthResponse, int) {
+	results := make([]ServiceHealth, len(s.names)+1)
+
+	g, gctx := errgroup.WithContext(r.Context())
+	ctx, cancel := context.WithTimeout(gctx, time.Second)
+	defer cancel()
+
+	for i, name := range s.names {
+		g.Go(func() error {
+			sh := ServiceHealth{Name: name}
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.urls[name]+"/health/ready", nil)
+			if err != nil {
+				sh.Status = "unreachable"
+				results[i] = sh
+				return nil
+			}
+			resp, err := s.client.Do(req)
+			if err != nil {
+				sh.Status = "unreachable"
+				results[i] = sh
+				return nil
+			}
+			resp.Body.Close()
+			sh.Status = "degraded"
+			if resp.StatusCode == http.StatusOK {
+				sh.Status = "healthy"
+			}
+			results[i] = sh
+			return nil
+		})
+	}
+
+	// Edge authentication channel detail (gRPC), probed in the same round.
+	g.Go(func() error {
+		sh := ServiceHealth{Name: "auth-grpc", Status: "unreachable"}
+		cctx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		resp, err := s.authHealth.Check(authclient.AppendSecret(cctx, s.secret),
+			&healthpb.HealthCheckRequest{})
+		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
+			sh.Status = "healthy"
+		}
+		results[len(s.names)] = sh
+		return nil
+	})
+
+	_ = g.Wait()
+
+	allHealthy := true
+	// Deployed services must be healthy for the overall report; pending
+	// ones are expected to be unreachable and must not degrade it.
+	for _, sh := range results[:len(s.names)] {
+		if sh.Status != "healthy" && s.deployed[sh.Name] {
+			allHealthy = false
+		}
+	}
+	if results[len(s.names)].Status != "healthy" {
+		allHealthy = false
+	}
+
+	status, code := "degraded", http.StatusServiceUnavailable
+	if allHealthy {
+		status, code = "healthy", http.StatusOK
+	}
+	return HealthResponse{Status: status, Services: results}, code
 }
 
 func main() {
@@ -80,8 +216,12 @@ func main() {
 	})
 
 	// ── catalogue: second live upstream ────────────────────────
-	catalogueURL := envOrDefault("CATALOGUE_URL", "http://localhost:8081")
-	catalogue.Mount(mux, catalogueURL, logger)
+	catalogueTarget, err := url.Parse(envOrDefault("CATALOGUE_URL", "http://localhost:8081"))
+	if err != nil {
+		logger.Error("bad CATALOGUE_URL", "err", err)
+		os.Exit(1)
+	}
+	catalogue.Mount(mux, catalogueTarget, logger)
 
 	// ── pending services: mounted, answering 501 until deployed ──
 	mux.Handle("/api/v1/messaging/", stub.NotDeployed("messaging"))
@@ -108,9 +248,7 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
 	})
-	mux.HandleFunc("/health/system", func(w http.ResponseWriter, r *http.Request) {
-		healthSystem(healthpb.NewHealthClient(conn), internalSecret, w, r)
-	})
+	mux.Handle("/health/system", newSystemProber(healthpb.NewHealthClient(conn), internalSecret))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
@@ -149,64 +287,4 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("gateway stopped cleanly")
-}
-
-func healthSystem(authHealth healthpb.HealthClient, secret string, w http.ResponseWriter, r *http.Request) {
-	client := &http.Client{Timeout: 2 * time.Second}
-	backendURLs := map[string]string{
-		"auth":      envOrDefault("AUTH_URL", "http://localhost:8080"),
-		"catalogue": envOrDefault("CATALOGUE_URL", "http://localhost:8081"),
-		"messaging": envOrDefault("MESSAGING_URL", "http://localhost:8082"),
-		"presence":  envOrDefault("PRESENCE_URL", "http://localhost:8083"),
-		"assets":    envOrDefault("ASSETS_URL", "http://localhost:8084"),
-		"admin":     envOrDefault("ADMIN_URL", "http://localhost:8085"),
-	}
-	names := []string{"auth", "catalogue", "messaging", "presence", "assets", "admin"}
-	results := make([]ServiceHealth, 0, len(names)+1)
-
-	allHealthy := true
-	// Deployed services must be healthy for the overall report; pending
-	// ones are expected to be unreachable and must not degrade it.
-	deployed := map[string]bool{"auth": true, "catalogue": true, "admin": true}
-	for _, name := range names {
-		sh := ServiceHealth{Name: name, URL: backendURLs[name]}
-		resp, err := client.Get(backendURLs[name] + "/health/ready")
-		if err != nil {
-			sh.Status = "unreachable"
-		} else {
-			resp.Body.Close()
-			if resp.StatusCode == 200 {
-				sh.Status = "healthy"
-			} else {
-				sh.Status = "degraded"
-			}
-		}
-		if sh.Status != "healthy" && deployed[name] {
-			allHealthy = false
-		}
-		results = append(results, sh)
-	}
-
-	// Edge authentication channel detail (gRPC).
-	grpcSh := ServiceHealth{Name: "auth-grpc", Status: "unreachable"}
-	cctx, cancel := context.WithTimeout(r.Context(), time.Second)
-	resp, err := authHealth.Check(authclient.AppendSecret(cctx, secret), &healthpb.HealthCheckRequest{})
-	cancel()
-	if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
-		grpcSh.Status = "healthy"
-	}
-	if grpcSh.Status != "healthy" {
-		allHealthy = false
-	}
-	results = append(results, grpcSh)
-
-	w.Header().Set("Content-Type", "application/json")
-	status := "degraded"
-	code := http.StatusServiceUnavailable
-	if allHealthy {
-		status = "healthy"
-		code = http.StatusOK
-	}
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(HealthResponse{Status: status, Services: results})
 }
