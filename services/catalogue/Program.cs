@@ -48,7 +48,9 @@ builder.Services
             ClockSkew = TimeSpan.FromSeconds(30),
             NameClaimType = "sub",
             RoleClaimType = "roles",
-            IssuerSigningKey = new SigningKeyResolver(authUrl).GetCurrentKey(),
+            // lazy, fail-soft: fetch failure -> no keys -> 401 fail-closed
+            IssuerSigningKeyResolver = (token, st, kid, parameters) =>
+                SigningKeyResolver.Resolve(authUrl, kid),
         };
         // the /dev harness and the browser use the om_access cookie; header wins
         o.Events = new JwtBearerEvents
@@ -68,7 +70,6 @@ builder.Services.AddAuthorization(o =>
     o.FallbackPolicy = o.DefaultPolicy;
 });
 builder.Services.AddSingleton<IIntrospector>(new GrpcIntrospector(authGrpcUrl, internalSecret));
-builder.Services.AddSingleton(new SigningKeyResolver(authUrl));
 builder.Services.AddHostedService<ExpiryScanner>();
 
 builder.Services.ConfigureHttpJsonOptions(Envelope.Configure);
@@ -134,24 +135,55 @@ app.Run();
 // exposes the implicit Program class to WebApplicationFactory in tests
 public partial class Program { }
 
-// tiny helper: pulls auth's current public RSA key from its JWKS endpoint
-public class SigningKeyResolver(string authUrl)
+// Fetches auth's public signing key from its JWKS endpoint — lazily at
+// first validation, cached for an hour, fail-soft (fetch failure returns
+// no keys => tokens 401 fail-closed rather than 500ing the request).
+// Auth's key lives on a persistent volume, so refreshes are rare by design.
+public static class SigningKeyResolver
 {
-    public Microsoft.IdentityModel.Tokens.RsaSecurityKey GetCurrentKey()
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(1);
+    private static readonly object Lock = new();
+    private static string? _cachedKid;
+    private static Microsoft.IdentityModel.Tokens.RsaSecurityKey? _cachedKey;
+    private static DateTime _fetchedAt;
+
+    public static IEnumerable<Microsoft.IdentityModel.Tokens.SecurityKey> Resolve(string authUrl, string? kid)
     {
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-        var json = http.GetStringAsync($"{authUrl}/.well-known/jwks.json").GetAwaiter().GetResult();
-        var jwks = new Microsoft.IdentityModel.Tokens.JsonWebKeySet(json);
-        var rsaJwk = jwks.Keys.FirstOrDefault(k => k.Kty == "RSA")
-            ?? throw new InvalidOperationException("auth JWKS contained no RSA key");
-        return new Microsoft.IdentityModel.Tokens.RsaSecurityKey(
-            new System.Security.Cryptography.RSAParameters
-            {
-                Exponent = Microsoft.IdentityModel.Tokens.Base64UrlEncoder.DecodeBytes(rsaJwk.E),
-                Modulus = Microsoft.IdentityModel.Tokens.Base64UrlEncoder.DecodeBytes(rsaJwk.N),
-            });
+        lock (Lock)
+        {
+            if (_cachedKey is null || DateTime.UtcNow - _fetchedAt > CacheTtl)
+                Refresh(authUrl);
+        }
+        if (_cachedKey is null) yield break;
+        if (kid is null || _cachedKid == kid) yield return _cachedKey;
+    }
+
+    private static void Refresh(string authUrl)
+    {
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            var json = http.GetStringAsync($"{authUrl}/.well-known/jwks.json").GetAwaiter().GetResult();
+            var jwks = new Microsoft.IdentityModel.Tokens.JsonWebKeySet(json);
+            var rsaJwk = jwks.Keys.FirstOrDefault(k => k.Kty == "RSA")
+                ?? throw new InvalidOperationException("auth JWKS contained no RSA key");
+            _cachedKid = rsaJwk.Kid;
+            _cachedKey = new Microsoft.IdentityModel.Tokens.RsaSecurityKey(
+                new System.Security.Cryptography.RSAParameters
+                {
+                    Exponent = Microsoft.IdentityModel.Tokens.Base64UrlEncoder.DecodeBytes(rsaJwk.E),
+                    Modulus = Microsoft.IdentityModel.Tokens.Base64UrlEncoder.DecodeBytes(rsaJwk.N),
+                });
+            _fetchedAt = DateTime.UtcNow;
+        }
+        catch (Exception)
+        {
+            _cachedKey = null; // fail soft; next validation retries the fetch
+        }
     }
 }
+
+
 
 
 
