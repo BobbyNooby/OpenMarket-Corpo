@@ -5,6 +5,7 @@ The **messaging** service owns conversations and chat between OpenMarket users.
 - **Stack:** Go (net/http + gorilla/websocket), port 8082
 - **Database:** PostgreSQL (`messaging_db`) — schema applied by the service's embedded migrations
 - **Contract:** [`contracts/openapi/messaging.v1.yaml`](../../contracts/openapi/messaging.v1.yaml)
+- **Tests:** [`docs/testing.md`](docs/testing.md) — 20 tests, three layers, and what's deliberately not tested
 
 ## Current state — LIVE (Phase 2, slice 1)
 
