@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/openmarket-corpo/gateway/internal/blocklist"
 	"github.com/openmarket-corpo/gateway/internal/middleware"
 	"github.com/openmarket-corpo/gateway/internal/proxy"
 )
@@ -23,14 +24,17 @@ type Config struct {
 	Introspector middleware.Introspector
 	// Timeout bounds each introspection call.
 	IntrospectTimeout time.Duration
-	Logger            *slog.Logger
+	// Blocklist short-circuits banned/deleted users at the edge; nil is
+	// valid (feature off — introspection remains the authority).
+	Blocklist *blocklist.Blocklist
+	Logger    *slog.Logger
 }
 
 // Mount registers auth's route families on mux. Returns the proxy so the
 // composition root can reuse it (health checks etc.).
 func Mount(mux *http.ServeMux, cfg Config) *httputil.ReverseProxy {
 	p := proxy.New(cfg.Target, cfg.Logger)
-	edge := middleware.Auth(cfg.Introspector, cfg.IntrospectTimeout, cfg.Logger)
+	edge := middleware.Auth(cfg.Introspector, cfg.IntrospectTimeout, cfg.Blocklist, cfg.Logger)
 
 	// Public document — no edge check, auth serves it anonymously.
 	mux.Handle("/.well-known/jwks.json", p)

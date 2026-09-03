@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -20,7 +21,10 @@ import (
 
 	"github.com/openmarket-corpo/gateway/internal/authclient"
 	authpb "github.com/openmarket-corpo/gateway/internal/authpb"
+	"github.com/openmarket-corpo/gateway/internal/blocklist"
 	"google.golang.org/grpc"
+
+	kafka "github.com/segmentio/kafka-go"
 
 	"github.com/openmarket-corpo/gateway/internal/httpx"
 	"github.com/openmarket-corpo/gateway/internal/upstream/auth"
@@ -33,6 +37,27 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// kafkaReader adapts segmentio/kafka-go to the blocklist.Reader interface.
+// One consumer goroutine only: `last` is safe without a lock because the
+// consume loop is strictly Next→Apply→Commit.
+type kafkaReader struct {
+	r    *kafka.Reader
+	last kafka.Message
+}
+
+func (k *kafkaReader) Next(ctx context.Context) (blocklist.Event, error) {
+	m, err := k.r.FetchMessage(ctx)
+	if err != nil {
+		return blocklist.Event{}, err
+	}
+	k.last = m
+	return blocklist.Event{Topic: m.Topic, Value: m.Value}, nil
+}
+
+func (k *kafkaReader) Commit(ctx context.Context, _ blocklist.Event) error {
+	return k.r.CommitMessages(ctx, k.last)
 }
 
 type ServiceHealth struct {
@@ -219,6 +244,35 @@ func main() {
 	defer conn.Close()
 	introspector := authpb.NewAuthServiceClient(conn)
 
+	// ── edge blocklist: auth's user.banned events → Redis ─────────
+	// Both halves are optional: no Redis or no Kafka just means every
+	// request pays the introspection round-trip instead of the cache hit.
+	var blocklisted *blocklist.Blocklist
+	if redisURL := envOrDefault("REDIS_URL", ""); redisURL != "" {
+		rdb := blocklist.DialRedis(redisURL)
+		defer rdb.Close()
+		blocklisted = blocklist.New(blocklist.RedisStore{RDB: rdb}, logger)
+		logger.Info("blocklist enabled", "redis", redisURL)
+	} else {
+		logger.Info("blocklist disabled (no REDIS_URL) — introspection only")
+	}
+	var blReader *kafka.Reader
+	if brokers := envOrDefault("KAFKA_BROKERS", ""); brokers != "" && blocklisted != nil {
+		blReader = kafka.NewReader(kafka.ReaderConfig{
+			Brokers: strings.Split(brokers, ","),
+			// Group topics: only events with a blocklist meaning today.
+			// user.roles_changed awaits its own consumer (events phase).
+			GroupTopics: []string{"user.banned", "user.unbanned", "user.deleted"},
+			GroupID:     "gateway-blocklist",
+			MinBytes:    1,
+			MaxBytes:    1 << 20,
+		})
+		defer blReader.Close()
+		logger.Info("blocklist consumer enabled", "brokers", brokers)
+	} else {
+		logger.Info("blocklist consumer disabled (no KAFKA_BROKERS or REDIS_URL)")
+	}
+
 	mux := http.NewServeMux()
 
 	// ── auth: the real upstream ────────────────────────────────
@@ -231,6 +285,7 @@ func main() {
 		Target:            target,
 		Introspector:      introspector,
 		IntrospectTimeout: 1 * time.Second,
+		Blocklist:         blocklisted,
 		Logger:            logger,
 	})
 
@@ -295,6 +350,12 @@ func main() {
 		logger.Info("gateway listening", "port", port, "auth_rest", authTarget, "auth_grpc", authGRPC)
 		return srv.ListenAndServe()
 	})
+	if blReader != nil {
+		g.Go(func() error {
+			blocklist.Consume(gctx, &kafkaReader{r: blReader}, blocklisted, logger)
+			return nil
+		})
+	}
 	g.Go(func() error {
 		<-gctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

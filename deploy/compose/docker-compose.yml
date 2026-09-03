@@ -84,6 +84,9 @@ services:
       ASSETS_URL: http://assets:8084
       ADMIN_URL: http://admin:8085
       REDIS_URL: redis:6379
+      # Edge blocklist consumer: user.banned/unbanned/deleted → Redis, so a
+      # banned user dies at the edge without an introspection round-trip.
+      KAFKA_BROKERS: kafka:9092
       OTLP_ENDPOINT: http://jaeger:4318
     depends_on:
       redis: { condition: service_healthy }

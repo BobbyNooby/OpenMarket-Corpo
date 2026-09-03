@@ -48,7 +48,7 @@ func handler(t *testing.T, seen *string) http.Handler {
 func Test_public_paths_bypass_introspection(t *testing.T) {
 	fake := &fakeIntrospector{}
 	var seen string
-	h := Auth(fake, time.Second, discardLogger())(handler(t, &seen))
+	h := Auth(fake, time.Second, nil, discardLogger())(handler(t, &seen))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
 	h.ServeHTTP(httptest.NewRecorder(), req)
@@ -61,7 +61,7 @@ func Test_public_paths_bypass_introspection(t *testing.T) {
 func Test_no_token_forwards_to_upstream_which_owns_the_401(t *testing.T) {
 	fake := &fakeIntrospector{}
 	var seen string
-	h := Auth(fake, time.Second, discardLogger())(handler(t, &seen))
+	h := Auth(fake, time.Second, nil, discardLogger())(handler(t, &seen))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/me", nil)
 	rec := httptest.NewRecorder()
@@ -78,7 +78,7 @@ func Test_no_token_forwards_to_upstream_which_owns_the_401(t *testing.T) {
 func Test_invalid_token_is_401_at_the_edge(t *testing.T) {
 	fake := &fakeIntrospector{resp: &authpb.IntrospectTokenResponse{Active: false}}
 	var seen string
-	h := Auth(fake, time.Second, discardLogger())(handler(t, &seen))
+	h := Auth(fake, time.Second, nil, discardLogger())(handler(t, &seen))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/me", nil)
 	req.Header.Set("Authorization", "Bearer garbage")
@@ -104,7 +104,7 @@ func Test_valid_token_sets_identity_and_forwards_original_header(t *testing.T) {
 		seen = r.Header.Get("Authorization")
 		gotID, gotOK = GetIdentity(r.Context())
 	})
-	h := Auth(fake, time.Second, discardLogger())(next)
+	h := Auth(fake, time.Second, nil, discardLogger())(next)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/me", nil)
 	req.Header.Set("Authorization", "Bearer good-token")
@@ -122,7 +122,7 @@ func Test_valid_token_sets_identity_and_forwards_original_header(t *testing.T) {
 func Test_cookie_fallback_when_no_header(t *testing.T) {
 	fake := &fakeIntrospector{resp: &authpb.IntrospectTokenResponse{Active: true, UserId: "u-1"}}
 	var seen string
-	h := Auth(fake, time.Second, discardLogger())(handler(t, &seen))
+	h := Auth(fake, time.Second, nil, discardLogger())(handler(t, &seen))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/me", nil)
 	req.AddCookie(&http.Cookie{Name: "om_access", Value: "cookie-token"})
@@ -136,7 +136,7 @@ func Test_cookie_fallback_when_no_header(t *testing.T) {
 func Test_introspection_unavailable_is_503_fail_closed(t *testing.T) {
 	fake := &fakeIntrospector{err: status.Error(codes.Unavailable, "auth down")}
 	var seen string
-	h := Auth(fake, time.Second, discardLogger())(handler(t, &seen))
+	h := Auth(fake, time.Second, nil, discardLogger())(handler(t, &seen))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/me", nil)
 	req.Header.Set("Authorization", "Bearer something")
@@ -153,7 +153,7 @@ func Test_introspection_unavailable_is_503_fail_closed(t *testing.T) {
 
 func Test_deadline_is_bounded(t *testing.T) {
 	fake := &slowIntrospector{delay: 50 * time.Millisecond}
-	h := Auth(fake, 10*time.Millisecond, discardLogger())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	h := Auth(fake, 10*time.Millisecond, nil, discardLogger())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/me", nil)
 	req.Header.Set("Authorization", "Bearer x")

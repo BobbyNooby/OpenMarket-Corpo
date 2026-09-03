@@ -14,7 +14,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	authpb "github.com/openmarket-corpo/gateway/internal/authpb"
+	"github.com/openmarket-corpo/gateway/internal/authpb"
+	"github.com/openmarket-corpo/gateway/internal/blocklist"
 	"github.com/openmarket-corpo/gateway/internal/httpx"
 )
 
@@ -82,11 +83,15 @@ func extractToken(r *http.Request) string {
 //   - public path            → pass through untouched
 //   - no token presented     → pass through (the upstream owns the 401, so
 //     the error shape has a single source of truth)
+//   - token whose sub is blocklisted → 401 at the edge (banned/deleted user,
+//     no upstream hop; nil blocklist skips the check — introspection stays
+//     the authority, the blocklist only short-circuits known-bad ids)
 //   - token + active=false   → 401 at the edge (invalid, expired, banned,
 //     deleted — no reason to burn an upstream hop)
 //   - token + introspection unavailable → 503 (fail closed on protected
 //     routes; a flaky check must never degrade into "allow")
-func Auth(introspector Introspector, timeout time.Duration, logger *slog.Logger) func(http.Handler) http.Handler {
+func Auth(introspector Introspector, timeout time.Duration,
+	blocked *blocklist.Blocklist, logger *slog.Logger) func(http.Handler) http.Handler {
 	cache := newIntrospectionCache(10*time.Second, 10_000)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -97,6 +102,11 @@ func Auth(introspector Introspector, timeout time.Duration, logger *slog.Logger)
 			token := extractToken(r)
 			if token == "" {
 				next.ServeHTTP(w, r)
+				return
+			}
+			if blocked.Blocked(r.Context(), blocklist.SubFromToken(token)) {
+				httpx.Error(w, http.StatusUnauthorized, "unauthorized",
+					"A valid access token is required")
 				return
 			}
 			if resp, ok := cache.get(token); ok {
