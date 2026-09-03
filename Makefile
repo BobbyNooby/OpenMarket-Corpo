@@ -76,6 +76,8 @@ test:
 	cd services/assets && python3 -m pytest
 	@echo "=== Java tests (auth) ==="
 	cd services/auth && mvn -q test
+	@echo "=== dotnet tests (catalogue) ==="
+	cd services/catalogue && dotnet test
 	@echo "All tests passed."
 
 lint:
@@ -87,4 +89,6 @@ lint:
 	cd services/assets && ruff check .
 	@echo "=== Java compile (auth) ==="
 	cd services/auth && mvn -q compile
+	@echo "=== dotnet build (catalogue) ==="
+	cd services/catalogue && dotnet build
 	@echo "All lint passed."

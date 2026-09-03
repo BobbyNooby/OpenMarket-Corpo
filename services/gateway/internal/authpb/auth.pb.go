@@ -274,8 +274,8 @@ const file_proto_openmarket_auth_v1_auth_proto_rawDesc = "" +
 	"\x05roles\x18\x03 \x03(\tR\x05roles2\xcd\x01\n" +
 	"\vAuthService\x12R\n" +
 	"\aGetUser\x12\".openmarket.auth.v1.GetUserRequest\x1a#.openmarket.auth.v1.GetUserResponse\x12j\n" +
-	"\x0fIntrospectToken\x12*.openmarket.auth.v1.IntrospectTokenRequest\x1a+.openmarket.auth.v1.IntrospectTokenResponseBq\n" +
-	"\x1fdev.bob.openmarket.auth.grpc.v1B\x10AuthServiceProtoP\x01Z:github.com/openmarket-corpo/gateway/internal/authpb;authpbb\x06proto3"
+	"\x0fIntrospectToken\x12*.openmarket.auth.v1.IntrospectTokenRequest\x1a+.openmarket.auth.v1.IntrospectTokenResponseB\x86\x01\n" +
+	"\x1fdev.bob.openmarket.auth.grpc.v1B\x10AuthServiceProtoP\x01Z:github.com/openmarket-corpo/gateway/internal/authpb;authpb\xaa\x02\x12Catalogue.AuthGrpcb\x06proto3"
 
 var (
 	file_proto_openmarket_auth_v1_auth_proto_rawDescOnce sync.Once

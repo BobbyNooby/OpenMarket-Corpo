@@ -21,6 +21,7 @@ import (
 	authpb "github.com/openmarket-corpo/gateway/internal/authpb"
 	"github.com/openmarket-corpo/gateway/internal/httpx"
 	"github.com/openmarket-corpo/gateway/internal/upstream/auth"
+	"github.com/openmarket-corpo/gateway/internal/upstream/catalogue"
 	"github.com/openmarket-corpo/gateway/internal/upstream/stub"
 )
 
@@ -78,8 +79,11 @@ func main() {
 		Logger:            logger,
 	})
 
+	// ── catalogue: second live upstream ────────────────────────
+	catalogueURL := envOrDefault("CATALOGUE_URL", "http://localhost:8081")
+	catalogue.Mount(mux, catalogueURL, logger)
+
 	// ── pending services: mounted, answering 501 until deployed ──
-	mux.Handle("/api/v1/catalogue/", stub.NotDeployed("catalogue"))
 	mux.Handle("/api/v1/messaging/", stub.NotDeployed("messaging"))
 	mux.Handle("/api/v1/presence/", stub.NotDeployed("presence"))
 	mux.Handle("/api/v1/assets/", stub.NotDeployed("assets"))

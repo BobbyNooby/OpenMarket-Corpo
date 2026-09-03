@@ -30,17 +30,20 @@ const (
 // Internal identity lookups for the gateway's BFF aggregation.
 // Auth owns the data; the gateway borrows it per request, never stores it.
 type AuthServiceClient interface {
-	// Resolve a user by id — the gateway's /api/v1/me and future aggregations
-	// start here. Unknown or soft-deleted users return NOT_FOUND.
+	// Resolve a user by id — reserved for the gateway's future BFF
+	// aggregations (not implemented on the server yet: answers UNIMPLEMENTED).
+	// Unknown or soft-deleted users return NOT_FOUND.
 	GetUser(ctx context.Context, in *GetUserRequest, opts ...grpc.CallOption) (*GetUserResponse, error)
 	// Validate an access token for the gateway's auth middleware. Returns the
 	// token's validity AND the account's live state — soft-deleted or banned
 	// accounts report active=false even while their token is cryptographically
-	// valid (the gateway must never wave through a revoked identity). Invalid,
-	// expired or malformed tokens also report active=false; infrastructure
-	// failures surface as gRPC Unavailable instead, so callers can 503 rather
-	// than 401. Auth re-validates the token downstream regardless — this is
-	// the edge check, not the only one.
+	// valid (signature checks cannot see database state). Invalid, expired or
+	// malformed tokens also report active=false; infrastructure failures
+	// surface as gRPC Unavailable instead, so callers can 503 rather than 401.
+	// NOTE: the gateway caches verdicts briefly (10s TTL), and auth's protected
+	// REST routes re-validate tokens cryptographically only — ban enforcement
+	// happens here (plus at login/refresh), so a fresh ban reaches the edge
+	// within the cache TTL, not instantly.
 	IntrospectToken(ctx context.Context, in *IntrospectTokenRequest, opts ...grpc.CallOption) (*IntrospectTokenResponse, error)
 }
 
@@ -79,17 +82,20 @@ func (c *authServiceClient) IntrospectToken(ctx context.Context, in *IntrospectT
 // Internal identity lookups for the gateway's BFF aggregation.
 // Auth owns the data; the gateway borrows it per request, never stores it.
 type AuthServiceServer interface {
-	// Resolve a user by id — the gateway's /api/v1/me and future aggregations
-	// start here. Unknown or soft-deleted users return NOT_FOUND.
+	// Resolve a user by id — reserved for the gateway's future BFF
+	// aggregations (not implemented on the server yet: answers UNIMPLEMENTED).
+	// Unknown or soft-deleted users return NOT_FOUND.
 	GetUser(context.Context, *GetUserRequest) (*GetUserResponse, error)
 	// Validate an access token for the gateway's auth middleware. Returns the
 	// token's validity AND the account's live state — soft-deleted or banned
 	// accounts report active=false even while their token is cryptographically
-	// valid (the gateway must never wave through a revoked identity). Invalid,
-	// expired or malformed tokens also report active=false; infrastructure
-	// failures surface as gRPC Unavailable instead, so callers can 503 rather
-	// than 401. Auth re-validates the token downstream regardless — this is
-	// the edge check, not the only one.
+	// valid (signature checks cannot see database state). Invalid, expired or
+	// malformed tokens also report active=false; infrastructure failures
+	// surface as gRPC Unavailable instead, so callers can 503 rather than 401.
+	// NOTE: the gateway caches verdicts briefly (10s TTL), and auth's protected
+	// REST routes re-validate tokens cryptographically only — ban enforcement
+	// happens here (plus at login/refresh), so a fresh ban reaches the edge
+	// within the cache TTL, not instantly.
 	IntrospectToken(context.Context, *IntrospectTokenRequest) (*IntrospectTokenResponse, error)
 	mustEmbedUnimplementedAuthServiceServer()
 }

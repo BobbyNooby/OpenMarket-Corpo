@@ -297,7 +297,6 @@ echo "── §14 gateway: the real entry point ──────────�
 PORT=3000 AUTH_URL=http://localhost:8080 AUTH_GRPC_URL=localhost:9090 \
   "$TMP/gateway" >"$TMP/gateway.log" 2>&1 &
 GATEWAY_PID=$!
-cleanup() { kill "${APP_PID:-}" 2>/dev/null; kill "${GATEWAY_PID:-}" 2>/dev/null; docker rm -f "$PG_CONTAINER" >/dev/null 2>&1; pkill -f fake-discord.py 2>/dev/null; }
 booted=""
 for i in $(seq 1 15); do
   grep -q "gateway listening" "$TMP/gateway.log" 2>/dev/null && { booted=1; break; }
@@ -310,8 +309,15 @@ API_GW="http://localhost:3000"
 step "gateway health/live → 200" 200 "$API_GW/health/live"
 step "unknown /api route → 404 (not the root info JSON)" 404 "$API_GW/api/v1/definitely-not-a-thing"
 expect "  …with the not_found code" "d['code']=='not_found'"
-step "catalogue stub → 501 not_deployed" 501 "$API_GW/api/v1/catalogue/items"
-expect "  …named the pending service" "d['code']=='not_deployed' and 'catalogue' in d['message']"
+docker exec $PG_CONTAINER psql -U om -d postgres -c 'CREATE DATABASE catalogue_db' >/dev/null 2>&1 || true
+(cd ../catalogue && dotnet publish -c Release -o "$TMP/catalogue" >/dev/null) || { echo "catalogue build failed"; exit 1; }
+DATABASE_URL="postgres://om:devpassword123@localhost:5434/catalogue_db" \
+DATABASE_SSLMODE=disable AUTH_URL=http://localhost:8080 \
+AUTH_GRPC_URL=http://localhost:9090 GRPC_INTERNAL_SECRET=dev-internal-secret \
+ASPNETCORE_URLS=http://localhost:8081 nohup "$TMP/catalogue/Catalogue" >"$TMP/catalogue.log" 2>&1 &
+CATALOGUE_PID=$!
+for i in $(seq 1 20); do sleep 1; curl -sf -m 2 http://localhost:8081/health/ready >/dev/null 2>&1 && break; done
+step "catalogue browse through gateway → 200 (live upstream)" 200 "$API_GW/api/v1/catalogue/items"
 step "register through gateway → 201" 201 -c "$TMP/cj-gw.txt" -X POST "$API_GW/api/v1/auth/register" \
   -H 'Content-Type: application/json' \
   -d '{"email":"heimer@demaciabook.com","password":"PoroRocket77","name":"Heimerdinger"}'
@@ -332,7 +338,35 @@ step "sessions through gateway → 200" 200 -b "$TMP/cj-gw.txt" "$API_GW/api/v1/
 # re-check bans — teemo's token is cryptographically valid (minted pre-ban),
 # so a 401 here can only come from the gateway's DB-backed introspection.
 step "banned user's pre-ban token through gateway → 401 at the edge" 401 -b "$TMP/cj-teemo.txt" "$API_GW/api/v1/users/me"
-kill "$GATEWAY_PID" 2>/dev/null
+
+echo "── §15 catalogue: items, listings, trades (via gateway) ────"
+step "catalogue health/ready → 200 (migrations + seed)" 200 http://localhost:8081/health/ready
+# lux self-deleted in §13 — bootstrap a fresh owner (live-owner count is 0)
+step "register flow-admin → 201 (owner bootstrap)" 201 -c "$TMP/cj-admin.txt" -X POST "$API_GW/api/v1/auth/register" \
+  -H 'Content-Type: application/json' -d '{"email":"flow-admin@demaciabook.com","password":"FlowAdmin123","name":"Flow Admin"}'
+step "flow-admin creates currency → 201" 201 -b "$TMP/cj-admin.txt" -X POST "$API_GW/api/v1/catalogue/currencies" \
+  -H 'Content-Type: application/json' -d '{"name":"Flow Crowns"}'
+FLOW_COIN_ID=$(curl -s -b "$TMP/cj-admin.txt" "$API_GW/api/v1/catalogue/currencies" | python3 -c "import json,sys; print([c['id'] for c in json.load(sys.stdin)['currencies'] if c['slug']=='flow-crowns'][0])")
+step "flow-admin creates item → 201" 201 -b "$TMP/cj-admin.txt" -X POST "$API_GW/api/v1/catalogue/items" \
+  -H 'Content-Type: application/json' -d '{"name":"Flow Blade","categorySlug":"weapons"}'
+FLOW_ITEM_ID=$(curl -s -b "$TMP/cj-admin.txt" "$API_GW/api/v1/catalogue/items" | python3 -c "import json,sys; print([i['id'] for i in json.load(sys.stdin)['items'] if i['slug']=='flow-blade'][0])")
+step "heimer posts buy listing (requests item, offers crowns) → 201" 201 -b "$TMP/cj-gw.txt" -X POST "$API_GW/api/v1/catalogue/listings" \
+  -H 'Content-Type: application/json' \
+  -d "{\"requestedItemId\":\"$FLOW_ITEM_ID\",\"amount\":2,\"orderType\":\"buy\",\"payingType\":\"each\",\"offered\":[{\"kind\":\"currency\",\"id\":\"$FLOW_COIN_ID\",\"amount\":5}]}"
+H_LISTING_ID=$(curl -s -b "$TMP/cj-gw.txt" "$API_GW/api/v1/catalogue/listings/me" | python3 -c "import json,sys; print(json.load(sys.stdin)['listings'][0]['id'])")
+step "browse listings by requested item → 200" 200 "$API_GW/api/v1/catalogue/listings?requestedItemId=$FLOW_ITEM_ID"
+step "heimer pauses → 200" 200 -b "$TMP/cj-gw.txt" -X POST "$API_GW/api/v1/catalogue/listings/$H_LISTING_ID/pause"
+step "heimer resumes → 200" 200 -b "$TMP/cj-gw.txt" -X POST "$API_GW/api/v1/catalogue/listings/$H_LISTING_ID/resume"
+step "garen (seller) accepts heimer's buy listing → 201 trade" 201 -b "$TMP/cj-gd.txt" -X POST "$API_GW/api/v1/catalogue/listings/$H_LISTING_ID/accept" \
+  -H 'Idempotency-Key: flow-trade-1'
+step "double accept → 409" 409 -b "$TMP/cj-gd.txt" -X POST "$API_GW/api/v1/catalogue/listings/$H_LISTING_ID/accept" \
+  -H 'Idempotency-Key: flow-trade-2'
+step "heimer sees the trade → 200" 200 -b "$TMP/cj-gw.txt" "$API_GW/api/v1/catalogue/listings/me/trades"
+step "heimer watchlist add → 200" 200 -b "$TMP/cj-gw.txt" -X PUT "$API_GW/api/v1/catalogue/me/watchlist/$H_LISTING_ID"
+step "heimer watchlist remove → 200" 200 -b "$TMP/cj-gw.txt" -X DELETE "$API_GW/api/v1/catalogue/me/watchlist/$H_LISTING_ID"
+step "plain user cannot create items → 403" 403 -b "$TMP/cj-gw.txt" -X POST "$API_GW/api/v1/catalogue/items" \
+  -H 'Content-Type: application/json' -d '{"name":"Sneaky Item"}'
+kill "$CATALOGUE_PID" "$GATEWAY_PID" 2>/dev/null
 
 echo "────────────────────────────────────────────────────────────"
 echo "RESULT: $PASS passed, $FAIL failed"
