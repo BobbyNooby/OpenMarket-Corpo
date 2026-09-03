@@ -5,6 +5,9 @@ package openmarket.auth.v1;
 // Go: generated into the gateway module (see contracts/generate.sh).
 option go_package = "github.com/openmarket-corpo/gateway/internal/authpb;authpb";
 
+// C#: generated into the catalogue service (Grpc.Tools client).
+option csharp_namespace = "Catalogue.AuthGrpc";
+
 // Java: generated into the auth service.
 option java_multiple_files = true;
 option java_package = "dev.bob.openmarket.auth.grpc.v1";
