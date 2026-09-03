@@ -120,6 +120,8 @@ services:
       GRPC_INTERNAL_SECRET: ${GRPC_INTERNAL_SECRET:-dev-internal-secret}
       # Trust X-Forwarded-For ONLY from the pinned gateway address.
       AUTH_TRUSTED_PROXY_IP: 10.200.200.10/32
+      # dev convenience: interactive API docs are deny-by-default now
+      AUTH_DOCS_PUBLIC: "true"
       # container-to-container Postgres has no TLS — the sslmode=require
       # heuristic is for remote hosts like Supabase
       DATABASE_SSLMODE: disable

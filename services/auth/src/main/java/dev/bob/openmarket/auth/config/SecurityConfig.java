@@ -59,29 +59,38 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http,
                                            org.springframework.security.oauth2.jwt.JwtDecoder jwtDecoder,
-                                           dev.bob.openmarket.auth.token.TokenCookieService tokenCookieService) throws Exception {
+                                           dev.bob.openmarket.auth.token.TokenCookieService tokenCookieService,
+                                           @org.springframework.beans.factory.annotation.Value(
+                                               "${auth.docs-public:${AUTH_DOCS_PUBLIC:false}}") boolean docsPublic) throws Exception {
         http
             .csrf(csrf -> csrf.disable())
             .httpBasic(basic -> basic.disable())
             .formLogin(form -> form.disable())
             .logout(logout -> logout.disable())
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/", "/health/live", "/health/ready").permitAll()
-                .requestMatchers("/actuator/health/**").permitAll()
-                .requestMatchers("/.well-known/jwks.json").permitAll()
-                .requestMatchers("/docs", "/v3/api-docs/**", "/swagger-ui/**").permitAll()
-                .requestMatchers("/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh").permitAll()
-                // logout must work even with an expired access token — the
-                // refresh cookie is proof enough, and the endpoint is
-                // best-effort by design (always clears cookies)
-                .requestMatchers("/api/v1/auth/logout").permitAll()
-                // OAuth: the browser hits these mid-redirect, possibly anonymous
-                .requestMatchers("/api/v1/auth/discord", "/api/v1/auth/discord/callback").permitAll()
-                // email flows: the e-mailed token is the credential
-                .requestMatchers("/api/v1/auth/verify-email", "/api/v1/auth/forgot-password",
-                    "/api/v1/auth/reset-password").permitAll()
-                .anyRequest().authenticated())
+            .authorizeHttpRequests(auth -> {
+                auth.requestMatchers("/", "/health/live", "/health/ready").permitAll()
+                    .requestMatchers("/actuator/health/**").permitAll()
+                    .requestMatchers("/.well-known/jwks.json").permitAll();
+                // interactive API docs are a dev tool — deny by default, opt
+                // in per environment (compose dev sets AUTH_DOCS_PUBLIC=true)
+                if (docsPublic) {
+                    auth.requestMatchers("/docs", "/v3/api-docs/**", "/swagger-ui/**").permitAll();
+                } else {
+                    auth.requestMatchers("/docs", "/v3/api-docs/**", "/swagger-ui/**").denyAll();
+                }
+                auth.requestMatchers("/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh").permitAll()
+                    // logout must work even with an expired access token — the
+                    // refresh cookie is proof enough, and the endpoint is
+                    // best-effort by design (always clears cookies)
+                    .requestMatchers("/api/v1/auth/logout").permitAll()
+                    // OAuth: the browser hits these mid-redirect, possibly anonymous
+                    .requestMatchers("/api/v1/auth/discord", "/api/v1/auth/discord/callback").permitAll()
+                    // email flows: the e-mailed token is the credential
+                    .requestMatchers("/api/v1/auth/verify-email", "/api/v1/auth/forgot-password",
+                        "/api/v1/auth/reset-password").permitAll()
+                    .anyRequest().authenticated();
+            })
             .oauth2ResourceServer(oauth -> oauth
                 .bearerTokenResolver(tokenCookieService)
                 .jwt(jwt -> jwt.jwtAuthenticationConverter(roleGrantingConverter()))

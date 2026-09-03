@@ -30,6 +30,17 @@ public class EmailFlowService {
 
     private static final Logger log = LoggerFactory.getLogger(EmailFlowService.class);
 
+    // Delivery runs OFF the request thread: a slow relay must not extend the
+    // response of always-quiet flows (known vs unknown address timing is the
+    // enumeration oracle). Daemon threads — the JVM's shutdown need not wait.
+    // Tests inject a same-thread executor via reflection for determinism.
+    private java.util.concurrent.Executor mailExecutor =
+        java.util.concurrent.Executors.newFixedThreadPool(2, r -> {
+            Thread t = new Thread(r, "auth-mail");
+            t.setDaemon(true);
+            return t;
+        });
+
     private final UserRepository users;
     private final CredentialRepository credentials;
     private final VerificationService verifications;
@@ -145,18 +156,36 @@ public class EmailFlowService {
 
         users.findByEmail(emailAddr).filter(u -> u.getDeletedAt() == null).ifPresent(user -> {
             String raw = verifications.issue(user.getId(), VerificationService.TYPE_PASSWORD_RESET, user.getEmail());
-            try {
-                email.send(user.getEmail(), "OpenMarket — reset your password",
-                    "Reset your password (valid 60 minutes):\n" + appUrl
-                        + "/reset-password?token=" + raw
-                        + "\n\nIf you didn't request this, ignore this message.");
-            } catch (Exception e) {
-                // a dead relay must not turn known addresses into 500s while
-                // unknown ones get 204 — that difference is an enumeration
-                // oracle. The always-204 contract wins; delivery problems
-                // surface in the logs/metrics instead.
-                log.warn("forgot-password mail delivery failed to {}: {}",
-                    user.getEmail(), e.getMessage());
+            String to = user.getEmail();
+            String subject = "OpenMarket — reset your password";
+            String body = "Reset your password (valid 60 minutes):\n" + appUrl
+                + "/reset-password?token=" + raw
+                + "\n\nIf you didn't request this, ignore this message.";
+            // Dispatch after commit, off-thread: (a) the request's duration
+            // stops depending on SMTP round-trips, closing the known-vs-
+            // unknown timing oracle; (b) the token insert must commit before
+            // delivery, or a reset link can race its own token row.
+            Runnable deliver = () -> {
+                try {
+                    email.send(to, subject, body);
+                } catch (Exception e) {
+                    // delivery problems surface in the logs, never as a 500 —
+                    // the always-204 contract wins
+                    log.warn("forgot-password mail delivery failed to {}: {}", to, e.getMessage());
+                }
+            };
+            if (org.springframework.transaction.support.TransactionSynchronizationManager
+                .isSynchronizationActive()) {
+                org.springframework.transaction.support.TransactionSynchronizationManager
+                    .registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            mailExecutor.execute(deliver);
+                        }
+                    });
+            } else {
+                // no transactional context (unit tests): deliver inline
+                deliver.run();
             }
         });
     }

@@ -28,7 +28,18 @@ public class InternalSecretInterceptor implements ServerInterceptor {
     private final byte[] expected;
 
     public InternalSecretInterceptor(
-        @Value("${grpc.server.internal-secret:${GRPC_INTERNAL_SECRET:dev-internal-secret}}") String expected) {
+        @Value("${grpc.server.internal-secret:${GRPC_INTERNAL_SECRET:dev-internal-secret}}") String expected,
+        org.springframework.core.env.Environment environment) {
+        // Same guard catalogue ships: the dev default must never silently
+        // survive into a prod-shaped environment. Spring has no profiles in
+        // active use here, so SPRING_PROFILES_ACTIVE=prod is the explicit
+        // production signal.
+        for (String profile : environment.getActiveProfiles()) {
+            if (profile.equals("prod") && "dev-internal-secret".equals(expected)) {
+                throw new IllegalStateException(
+                    "GRPC_INTERNAL_SECRET is unset or still the dev default — refusing to start with the prod profile active");
+            }
+        }
         this.expected = expected.getBytes(StandardCharsets.UTF_8);
     }
 

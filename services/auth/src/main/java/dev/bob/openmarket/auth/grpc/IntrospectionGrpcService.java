@@ -77,28 +77,39 @@ public class IntrospectionGrpcService extends AuthServiceGrpc.AuthServiceImplBas
             return;
         }
 
-        var user = users.findByIdAndDeletedAtIsNull(userId);
-        if (user.isEmpty()) {
-            responseObserver.onNext(inactive());
-            responseObserver.onCompleted();
-            return;
-        }
+        // The store section is the infrastructure-sensitive part: a DB outage
+        // here must surface as UNAVAILABLE (the proto contract, so consumers
+        // fail closed 503) — uncaught, grpc-java would close with UNKNOWN and
+        // a future consumer mapping UNKNOWN→500 would break fail-closed.
+        try {
+            var user = users.findByIdAndDeletedAtIsNull(userId);
+            if (user.isEmpty()) {
+                responseObserver.onNext(inactive());
+                responseObserver.onCompleted();
+                return;
+            }
 
-        boolean banned = bans.findFirstByUserIdAndLiftedAtIsNullOrderByBannedAtDesc(userId)
-            .filter(b -> b.isActive(Instant.now()))
-            .isPresent();
-        if (banned) {
-            responseObserver.onNext(inactive());
-            responseObserver.onCompleted();
-            return;
-        }
+            boolean banned = bans.findFirstByUserIdAndLiftedAtIsNullOrderByBannedAtDesc(userId)
+                .filter(b -> b.isActive(Instant.now()))
+                .isPresent();
+            if (banned) {
+                responseObserver.onNext(inactive());
+                responseObserver.onCompleted();
+                return;
+            }
 
-        responseObserver.onNext(IntrospectTokenResponse.newBuilder()
-            .setActive(true)
-            .setUserId(userId.toString())
-            .addAllRoles(userRoles.findRoleIdsByUserId(userId))
-            .build());
-        responseObserver.onCompleted();
+            responseObserver.onNext(IntrospectTokenResponse.newBuilder()
+                .setActive(true)
+                .setUserId(userId.toString())
+                .addAllRoles(userRoles.findRoleIdsByUserId(userId))
+                .build());
+            responseObserver.onCompleted();
+        } catch (org.springframework.dao.DataAccessException e) {
+            responseObserver.onError(Status.UNAVAILABLE
+                .withDescription("auth store unavailable")
+                .withCause(e)
+                .asRuntimeException());
+        }
     }
 
     private IntrospectTokenResponse inactive() {

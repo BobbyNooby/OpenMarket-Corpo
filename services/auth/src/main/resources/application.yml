@@ -25,7 +25,8 @@ management:
         include: health
   endpoint:
     health:
-      show-details: always
+      # details are an internal diagnostic — default off, opt in per env
+      show-details: ${HEALTH_SHOW_DETAILS:never}
 
 server:
   port: 8080
@@ -44,6 +45,9 @@ jwt:
   key-path: ${JWT_KEY_PATH:keys/jwt-rsa.jwk}
 
 auth:
+  # Interactive API docs (/docs, swagger-ui) — public only where explicitly
+  # enabled; the default is deny so a prod deploy can't leak the API surface.
+  docs-public: ${AUTH_DOCS_PUBLIC:false}
   # Secure-by-default: browsers accept Secure cookies on http://localhost, so
   # dev is unaffected — but a forgotten env var in prod can no longer ship
   # session cookies over plain HTTP. Set AUTH_COOKIE_SECURE=false ONLY for

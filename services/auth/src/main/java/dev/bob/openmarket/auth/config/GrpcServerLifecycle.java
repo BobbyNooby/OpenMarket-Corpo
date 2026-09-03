@@ -27,9 +27,12 @@ import java.util.concurrent.TimeUnit;
  * {@link InternalSecretInterceptor}) so a foothold in any other container
  * can't use auth as a token-validity oracle.
  *
- * <p>Bounds: fixed executor (a DB stall must not spawn unbounded threads),
- * 64 KiB max message (tokens are small; garbage is not welcome), capped
- * concurrent calls per connection.
+ * <p>Bounds: fixed executor (a DB stall must not spawn unbounded threads —
+ * note both consumers, gateway and catalogue, share this pool through their
+ * calls, so one misbehaving consumer can starve the other; per-consumer
+ * quotas are a documented Phase 4 item), 64 KiB max message (tokens are
+ * small; garbage is not welcome), and a cap on concurrent calls per
+ * connection.
  *
  * <p>The standard health service answers SERVING only while the server is
  * up, which the gateway polls at boot so a cold auth doesn't turn the first
@@ -63,9 +66,10 @@ public class GrpcServerLifecycle implements SmartLifecycle {
             return;
         }
         try {
-            server = ServerBuilder.forPort(port)
+            server = io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder.forPort(port)
                 .executor(executor)
                 .maxInboundMessageSize(64 * 1024)
+                .maxConcurrentCallsPerConnection(100) // ServerBuilder doesn't expose this — netty-specific
                 .addService(ServerInterceptors.intercept(introspection, secretInterceptor))
                 .addService(health.getHealthService())
                 .build()
