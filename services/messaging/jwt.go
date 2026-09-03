@@ -33,23 +33,27 @@ type jwkSet struct {
 
 // JWKSVerifier caches auth's /.well-known/jwks.json and validates RS256
 // signatures + expiry locally. Refresh happens lazily when an unknown kid
-// shows up (key rotation) and on a max-age timer.
+// shows up (key rotation) and on a max-age timer — with a negative cache:
+// without it, a flood of garbage-kid tokens would force a fresh JWKS fetch
+// per request and wedge auth entirely (audit Important fix).
 type JWKSVerifier struct {
 	jwksURL string
 	client  *http.Client
 
-	mu      sync.Mutex
-	keys    map[string]*rsa.PublicKey
-	fetched time.Time
-	maxAge  time.Duration
+	mu       sync.Mutex
+	keys     map[string]*rsa.PublicKey
+	fetched  time.Time
+	maxAge   time.Duration
+	minFetch time.Duration
 }
 
 func NewJWKSVerifier(jwksURL string) *JWKSVerifier {
 	return &JWKSVerifier{
-		jwksURL: jwksURL,
-		client:  &http.Client{Timeout: 5 * time.Second},
-		keys:    map[string]*rsa.PublicKey{},
-		maxAge:  time.Hour,
+		jwksURL:  jwksURL,
+		client:   &http.Client{Timeout: 5 * time.Second},
+		keys:     map[string]*rsa.PublicKey{},
+		maxAge:   time.Hour,
+		minFetch: 30 * time.Second,
 	}
 }
 
@@ -61,7 +65,7 @@ func (v *JWKSVerifier) Verify(ctx context.Context, raw string) (uuid.UUID, error
 	claims := jwt.RegisteredClaims{}
 	token, err := jwt.ParseWithClaims(raw, &claims, func(t *jwt.Token) (any, error) {
 		return key, nil
-	}, jwt.WithValidMethods([]string{"RS256"}))
+	}, jwt.WithValidMethods([]string{"RS256"}), jwt.WithExpirationRequired())
 	if err != nil || !token.Valid {
 		return uuid.Nil, fmt.Errorf("invalid token")
 	}
@@ -84,15 +88,19 @@ func (v *JWKSVerifier) signingKey(ctx context.Context, raw string) (*rsa.PublicK
 			return nil, err
 		}
 	}
-	kid := kidOf(raw)
-	if key, ok := v.keys[kid]; ok {
+	if key, ok := v.keys[kidOf(raw)]; ok {
 		return key, nil
 	}
-	// Unknown kid → auth may have rotated; one forced refresh, then give up.
+	// Unknown kid → auth may have rotated; refresh — but at most once per
+	// minFetch, so garbage-kid floods cost one fetch per window, not one
+	// per request.
+	if time.Since(v.fetched) < v.minFetch {
+		return nil, fmt.Errorf("unknown signing key")
+	}
 	if err := v.fetchLocked(ctx); err != nil {
 		return nil, err
 	}
-	if key, ok := v.keys[kid]; ok {
+	if key, ok := v.keys[kidOf(raw)]; ok {
 		return key, nil
 	}
 	return nil, fmt.Errorf("unknown signing key")

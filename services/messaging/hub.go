@@ -9,11 +9,17 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// maxConnsPerUser bounds socket accumulation (tabs, reconnect storms) —
+// the 9th concurrent socket displaces the oldest instead of growing the
+// fan-out unbounded (audit Important fix).
+const maxConnsPerUser = 8
+
 // wsConn is one live browser socket. Writes are serialized: the read pump
 // owns control frames while pushes arrive from any broadcast goroutine.
 type wsConn struct {
-	raw *websocket.Conn
-	mu  sync.Mutex
+	raw   *websocket.Conn
+	mu    sync.Mutex
+	owner uuid.UUID
 }
 
 func (c *wsConn) write(payload any) error {
@@ -34,13 +40,19 @@ func NewHub() *Hub {
 	return &Hub{conns: map[uuid.UUID]map[*wsConn]struct{}{}}
 }
 
-func (h *Hub) add(userID uuid.UUID, c *wsConn) {
+// add registers a socket; if the user is at the cap, the NEW connection is
+// rejected (nil return) so a reconnect storm can't grow the fan-out.
+func (h *Hub) add(userID uuid.UUID, c *wsConn) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if len(h.conns[userID]) >= maxConnsPerUser {
+		return false
+	}
 	if h.conns[userID] == nil {
 		h.conns[userID] = map[*wsConn]struct{}{}
 	}
 	h.conns[userID][c] = struct{}{}
+	return true
 }
 
 func (h *Hub) remove(userID uuid.UUID, c *wsConn) {
@@ -61,8 +73,10 @@ type wsEvent struct {
 }
 
 // Broadcast delivers the event to every live socket of every listed user.
-// Dead sockets are dropped silently — the client reconnects; delivery is
-// best-effort by design (REST remains the source of truth).
+// Writes run on their own goroutines: a stalled participant socket (5s
+// write deadline) must never stall the sender's REST response. Dead
+// sockets are dropped — the client reconnects; REST remains the source of
+// truth.
 func (h *Hub) Broadcast(logger *slog.Logger, userIDs []uuid.UUID, ev wsEvent) {
 	h.mu.RLock()
 	var targets []*wsConn
@@ -74,9 +88,11 @@ func (h *Hub) Broadcast(logger *slog.Logger, userIDs []uuid.UUID, ev wsEvent) {
 	h.mu.RUnlock()
 
 	for _, c := range targets {
-		if err := c.write(ev); err != nil {
-			logger.Warn("ws push failed — dropping socket", "err", err)
-			c.raw.Close()
-		}
+		go func(c *wsConn) {
+			if err := c.write(ev); err != nil {
+				logger.Warn("ws push failed — dropping socket", "err", err)
+				c.raw.Close()
+			}
+		}(c)
 	}
 }

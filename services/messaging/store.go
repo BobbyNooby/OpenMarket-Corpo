@@ -70,8 +70,25 @@ type PostgresStore struct {
 func NewPostgresStore(db *sql.DB) *PostgresStore { return &PostgresStore{db: db} }
 
 func (s *PostgresStore) CreateOrGetConversation(ctx context.Context, userID, otherUserID uuid.UUID, listingID *uuid.UUID) (Conversation, bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Conversation{}, false, err
+	}
+	defer tx.Rollback()
+
+	// Serialize same-pair creation: the uniqueness that makes this
+	// idempotent is the pair itself, and a check-then-insert race would
+	// fork the thread into two (audit fix — the (conversation_id, user_id)
+	// PK only guards membership, not pair count). A hash collision merely
+	// serializes an unrelated pair for a moment; correctness is unaffected.
+	var lock int
+	if err := tx.QueryRowContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(least($1::text, $2::text) || greatest($1::text, $2::text)))`,
+		userID, otherUserID).Scan(&lock); err != nil {
+		return Conversation{}, false, err
+	}
+
 	var existing Conversation
-	err := s.db.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 		SELECT c.id, c.created_at, c.updated_at, c.listing_id
 		FROM conversations c
 		JOIN conversation_participants p1 ON p1.conversation_id = c.id AND p1.user_id = $1
@@ -85,12 +102,6 @@ func (s *PostgresStore) CreateOrGetConversation(ctx context.Context, userID, oth
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Conversation{}, false, err
 	}
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Conversation{}, false, err
-	}
-	defer tx.Rollback()
 
 	var conv Conversation
 	err = tx.QueryRowContext(ctx, `
@@ -196,7 +207,9 @@ func (s *PostgresStore) ListMessages(ctx context.Context, userID, conversationID
 		SELECT id, conversation_id, sender_id, content, created_at, edited_at, is_deleted
 		FROM messages
 		WHERE conversation_id = $1
-		  AND ($3::uuid IS NULL OR created_at < (SELECT created_at FROM messages WHERE id = $3))
+		  AND ($3::uuid IS NULL OR created_at < (
+		      SELECT created_at FROM messages
+		      WHERE id = $3 AND conversation_id = $1))
 		ORDER BY created_at DESC
 		LIMIT $2`, conversationID, limit, before)
 	if err != nil {

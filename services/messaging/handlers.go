@@ -365,8 +365,15 @@ func (a *app) ws(w http.ResponseWriter, r *http.Request) {
 		// Upgrade already wrote the HTTP error (e.g. 403 on bad Origin)
 		return
 	}
-	c := &wsConn{raw: conn}
-	a.hub.add(userID, c)
+	c := &wsConn{raw: conn, owner: userID}
+	if !a.hub.add(userID, c) {
+		// reconnect storm / too many tabs: refuse the socket politely
+		conn.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "too many connections"),
+			time.Now().Add(time.Second))
+		conn.Close()
+		return
+	}
 	defer a.hub.remove(userID, c)
 
 	conn.SetReadLimit(512)
