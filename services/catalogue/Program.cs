@@ -1,6 +1,5 @@
 using Catalogue.Auth;
 using Catalogue.Endpoints;
-using Catalogue.Endpoints;
 using Catalogue.Infrastructure;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http.Json;
@@ -22,6 +21,18 @@ var sslMode = builder.Configuration["DATABASE_SSLMODE"] ?? "auto";
 var authUrl = builder.Configuration["AUTH_URL"] ?? "http://localhost:8080";
 var authGrpcUrl = builder.Configuration["AUTH_GRPC_URL"] ?? "http://localhost:9090";
 var internalSecret = builder.Configuration["GRPC_INTERNAL_SECRET"] ?? "dev-internal-secret";
+
+// dev fallbacks must never silently survive into a prod-shaped environment.
+// (The compose stack runs Development explicitly — it IS the dev environment.)
+if (builder.Environment.IsProduction())
+{
+    if (internalSecret == "dev-internal-secret")
+        throw new InvalidOperationException(
+            "GRPC_INTERNAL_SECRET is unset or still the dev default — refusing to start in Production");
+    if (pgPassword == "devpassword123")
+        throw new InvalidOperationException(
+            "POSTGRES_PASSWORD is unset or still the dev default — refusing to start in Production");
+}
 
 var connectionString = DatabaseUrl.ToConnectionString(databaseUrl, pgHost, pgPort, pgUser, pgPassword, sslMode);
 
@@ -110,9 +121,10 @@ app.MapGet("/health/ready", async (NpgsqlDataSource ds) =>
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT count(*) FROM \"Outbox\" WHERE \"PublishedAt\" IS NULL";
         depth = (long)(await cmd.ExecuteScalarAsync())!;
-        // outbox depth is informational until the Kafka relay lands; warn loudly
+        // outbox backpressure degrades readiness once the relay lands; before
+        // that it warns loudly in the payload while staying honest about 503
         if (depth > 10_000)
-            Results.Json(new { status = "degraded", outboxDepth = depth }, statusCode: 503);
+            return Results.Json(new { status = "degraded", outboxDepth = depth }, statusCode: 503);
         return Results.Json(new { status = "ready", outboxDepth = depth });
     }
     catch (Exception)

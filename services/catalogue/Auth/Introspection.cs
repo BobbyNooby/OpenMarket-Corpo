@@ -41,13 +41,24 @@ public class GrpcIntrospector : IIntrospector
         {
             var resp = await client.IntrospectTokenAsync(
                 new IntrospectTokenRequest { AccessToken = accessToken }, headers, deadline: DateTime.UtcNow.AddSeconds(2));
-            var roles = new List<string>(resp.Roles);
-            return new IntrospectionResult(resp.Active, Guid.TryParse(resp.UserId, out var id) ? id : Guid.Empty, roles);
+            return Map(resp);
         }
-        catch (RpcException e) when (e.StatusCode == StatusCode.Unavailable
-            || e.StatusCode == StatusCode.DeadlineExceeded)
+        catch (RpcException e) when (e.StatusCode is StatusCode.Unavailable
+            or StatusCode.DeadlineExceeded or StatusCode.Internal or StatusCode.Unknown)
         {
-            return null; // caller fails closed 503
+            // infrastructure failure of any shape — caller fails closed 503
+            return null;
         }
+    }
+
+    /// <summary>
+    /// Auth's verdict → local identity. A malformed user id is an auth-side
+    /// contract violation: failing closed (null → 503) beats minting a
+    /// Guid.Empty identity that would then own listings and trades.
+    /// </summary>
+    public static IntrospectionResult? Map(IntrospectTokenResponse resp)
+    {
+        if (!Guid.TryParse(resp.UserId, out var id)) return null;
+        return new IntrospectionResult(resp.Active, id, new List<string>(resp.Roles));
     }
 }

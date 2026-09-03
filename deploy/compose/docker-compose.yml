@@ -142,6 +142,9 @@ services:
       additional_contexts:
         contracts: ../../contracts
     environment:
+      # compose IS the dev environment — say so explicitly so the service's
+      # Production fail-fast (dev-default secrets) never fights this stack
+      ASPNETCORE_ENVIRONMENT: Development
       DATABASE_URL: postgres://om:${POSTGRES_PASSWORD:-devpassword123}@postgres:5432/catalogue_db
       DATABASE_SSLMODE: disable
       AUTH_URL: http://auth:8080

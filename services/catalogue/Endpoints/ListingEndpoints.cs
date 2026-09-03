@@ -18,7 +18,6 @@ public static class ListingEndpoints
         Guid? RequestedItemId, Guid? RequestedCurrencyId, List<OfferedLine>? Offered);
 
     private const int MaxOfferLines = 20;
-    private static readonly DateTime MaxHorizon = DateTime.UtcNow.AddDays(30);
 
     public static IEndpointConventionBuilder MapListings(this IEndpointRouteBuilder app,
         IIntrospector intro, ILogger logger)
@@ -433,7 +432,9 @@ public static class ListingEndpoints
         {
             if (exp <= DateTime.UtcNow)
                 return Envelope.Error(400, "validation_failed", "expiresAt must be in the future", "expiresAt");
-            if (exp > MaxHorizon)
+            // per request, never a static: a process-lifetime horizon silently
+            // shrinks with uptime until every dated create is rejected
+            if (exp > DateTime.UtcNow.AddDays(30))
                 return Envelope.Error(400, "validation_failed", "expiresAt may be at most 30 days out", "expiresAt");
         }
 

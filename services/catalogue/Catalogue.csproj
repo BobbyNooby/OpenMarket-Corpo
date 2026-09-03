@@ -18,6 +18,9 @@
     <PackageReference Include="Google.Protobuf" Version="3.31.0" />
     <PackageReference Include="Npgsql.DependencyInjection" Version="10.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
+    <!-- transitive via AspNetCore.OpenApi at a vulnerable version (NU1903,
+         GHSA-v5pm-xwqc-g5wc: first patched 2.7.5) — direct-pin wins the fight -->
+    <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
     <PackageReference Include="Grpc.Net.Client" Version="2.71.0" />
     <PackageReference Include="Grpc.Tools" Version="2.72.0" PrivateAssets="all" />
   </ItemGroup>
