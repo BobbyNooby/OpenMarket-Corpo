@@ -535,6 +535,99 @@ public class SecurityAndFlowTests(CatalogueFixture fx, ITestOutputHelper output)
             fx.Introspector.Override = null;
         }
     }
+
+    // ── adversarial round 2: lost updates + replay scoping ────
+
+    [Fact]
+    public async Task stale_patch_on_sold_listing_conflicts_instead_of_rewriting()
+    {
+        var coin = await AdminCreateCurrency("Stale Patch Coin");
+        var listingId = await CreateListing("stale-patch-seller", coin);
+
+        // simulate the accept winning in between: flip the row out-of-band
+        using (var scope = fx.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<CatalogueDbContext>();
+            await db.Listings.Where(l => l.Id == listingId)
+                .ExecuteUpdateAsync(s => s.SetProperty(l => l.Status, ListingStatus.Sold));
+        }
+
+        // a PATCH loaded before the sale must NOT silently rewrite the sold
+        // listing behind the frozen trade snapshot
+        var stale = NewClient("stale-patch-seller", roles: ["user"]);
+        var patch = await stale.PatchAsJsonAsync($"/api/v1/catalogue/listings/{listingId}", new
+        {
+            amount = 99,
+            requestedCurrencyId = coin,
+            offered = new[] { new { kind = "currency", id = coin, amount = 1 } },
+        });
+        Assert.Equal(HttpStatusCode.Conflict, patch.StatusCode);
+
+        // the sold terms are intact
+        var get = await Anonymous().GetAsync($"/api/v1/catalogue/listings/{listingId}");
+        var body = await get.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(1, body.GetProperty("amount").GetInt32());
+    }
+
+    [Fact]
+    public async Task accept_key_reused_on_other_listing_conflicts()
+    {
+        var coin = await AdminCreateCurrency("Key Scope Coin");
+        var listingA = await CreateListing("key-scope-seller-a", coin);
+        var listingB = await CreateListing("key-scope-seller-b", coin);
+
+        var buyer = NewClient("key-scope-buyer", roles: ["user"]);
+        var first = await buyer.PostJsonWithKey($"/api/v1/catalogue/listings/{listingA}/accept", new { }, "cross-key");
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+
+        // same key, DIFFERENT listing — replaying A's trade here is a lie
+        var second = await buyer.PostJsonWithKey($"/api/v1/catalogue/listings/{listingB}/accept", new { }, "cross-key");
+        Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+    }
+
+    [Fact]
+    public async Task create_replay_with_garbage_order_type_is_400_not_500()
+    {
+        var coin = await AdminCreateCurrency("Garbage Enum Coin");
+        var client = NewClient("garbage-enum-user", roles: ["user"]);
+        var first = await client.PostJsonWithKey("/api/v1/catalogue/listings", new
+        {
+            requestedCurrencyId = coin,
+            amount = 1,
+            orderType = "sell",
+            payingType = "each",
+            offered = new[] { new { kind = "currency", id = coin, amount = 1 } },
+        }, "garbage-key");
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+
+        // validation must reject this BEFORE the replay comparison parses it
+        var replay = await client.PostJsonWithKey("/api/v1/catalogue/listings", new
+        {
+            requestedCurrencyId = coin,
+            amount = 1,
+            orderType = "banana",
+            payingType = "each",
+            offered = new[] { new { kind = "currency", id = coin, amount = 1 } },
+        }, "garbage-key");
+        Assert.Equal(HttpStatusCode.BadRequest, replay.StatusCode);
+    }
+
+    [Fact]
+    public async Task expires_at_without_timezone_is_400_not_500()
+    {
+        var coin = await AdminCreateCurrency("Naive Time Coin");
+        var client = NewClient("naive-time-user", roles: ["user"]);
+        var res = await client.PostAsJsonAsync("/api/v1/catalogue/listings", new
+        {
+            requestedCurrencyId = coin,
+            amount = 1,
+            orderType = "sell",
+            payingType = "each",
+            expiresAt = "2030-01-01T00:00:00", // no offset → Unspecified kind
+            offered = new[] { new { kind = "currency", id = coin, amount = 1 } },
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+    }
 }
 
 public static class TestHttpExtensions

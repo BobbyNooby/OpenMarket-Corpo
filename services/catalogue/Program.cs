@@ -73,6 +73,14 @@ builder.Services
                     e.Token = cookie;
                 return Task.CompletedTask;
             },
+            // require a parseable sub at the boundary — handlers never see an
+            // identity that couldn't be a real user id (Edge.Sub stays total)
+            OnTokenValidated = e =>
+            {
+                if (!Guid.TryParse(e.Principal?.FindFirst("sub")?.Value, out _))
+                    e.Fail("token has no parseable sub claim");
+                return Task.CompletedTask;
+            },
         };
     });
 builder.Services.AddAuthorization(o =>
@@ -136,7 +144,7 @@ app.MapGet("/health/ready", async (NpgsqlDataSource ds) =>
 app.MapGet("/", () => Results.Json(new { service = "catalogue", status = "ok", version = "0.2.0" }))
     .AllowAnonymous();
 
-app.MapOpenApi();
+app.MapOpenApi().AllowAnonymous();
 
 app.MapListings(app.Services.GetRequiredService<IIntrospector>(), logger);
 app.MapCatalog(app.Services.GetRequiredService<IIntrospector>(), logger);

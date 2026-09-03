@@ -63,8 +63,17 @@ public static class MeEndpoints
 
             var existsEntry = await db.Watchlist.FindAsync(sub, listingId);
             if (existsEntry is null)
+            {
                 db.Watchlist.Add(new WatchlistEntry { UserId = sub, ListingId = listingId });
-            await db.SaveChangesAsync();
+                try
+                {
+                    await db.SaveChangesAsync();
+                }
+                catch (DbUpdateException)
+                {
+                    // concurrent double-watch: watching=true either way — idempotent
+                }
+            }
             return Results.Ok(new { listingId, watching = true });
         });
 
@@ -117,6 +126,7 @@ public static class MeEndpoints
             var body = await ctx.Request.ReadFromJsonAsync<AddItemListRequest>();
             if (body is null
                 || !System.Enum.TryParse<ItemListType>(body.ListType, ignoreCase: true, out var listType)
+                || !System.Enum.IsDefined(listType) // "999" parses into a phantom enum value
                 || num_non_nulls(body.ItemId, body.CurrencyId) != 1)
                 return Envelope.Error(400, "validation_failed",
                     "listType plus exactly one of itemId / currencyId is required");
@@ -145,7 +155,16 @@ public static class MeEndpoints
                 CurrencyId = body.CurrencyId,
             };
             db.UserItemLists.Add(entry);
-            await db.SaveChangesAsync();
+            try
+            {
+                await db.SaveChangesAsync();
+            }
+            catch (DbUpdateException)
+            {
+                // lost a check-then-act race against the unique index — the
+                // honest answer is the same 409 the pre-check would give
+                return Envelope.Error(409, "already_listed", "Already on this list");
+            }
             return Results.Json(new { entry.Id, listType = body.ListType }, statusCode: 201);
 
             static int num_non_nulls(Guid? a, Guid? b) => (a is not null ? 1 : 0) + (b is not null ? 1 : 0);

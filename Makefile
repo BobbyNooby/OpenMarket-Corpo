@@ -77,7 +77,7 @@ test:
 	@echo "=== Java tests (auth) ==="
 	cd services/auth && mvn -q test
 	@echo "=== dotnet tests (catalogue) ==="
-	cd services/catalogue && dotnet test
+	cd services/catalogue && dotnet test Catalogue.Tests
 	@echo "All tests passed."
 
 lint:

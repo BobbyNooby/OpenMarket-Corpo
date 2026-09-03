@@ -43,10 +43,11 @@ public class GrpcIntrospector : IIntrospector
                 new IntrospectTokenRequest { AccessToken = accessToken }, headers, deadline: DateTime.UtcNow.AddSeconds(2));
             return Map(resp);
         }
-        catch (RpcException e) when (e.StatusCode is StatusCode.Unavailable
-            or StatusCode.DeadlineExceeded or StatusCode.Internal or StatusCode.Unknown)
+        catch (RpcException)
         {
-            // infrastructure failure of any shape — caller fails closed 503
+            // any gRPC failure is infrastructure — outage, deadline, secret
+            // rotation mismatch, missing RPC. Callers fail closed 503; nothing
+            // here should ever masquerade as "our bug" via a 500.
             return null;
         }
     }

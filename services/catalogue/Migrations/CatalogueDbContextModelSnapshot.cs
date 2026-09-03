@@ -187,6 +187,12 @@ namespace Catalogue.Migrations
 
                     b.HasKey("Id");
 
+                    // optimistic concurrency on the postgres system column —
+                    // exists on every row, so no migration DDL accompanies it
+                    b.Property<uint>("xmin")
+                        .HasColumnType("xid")
+                        .IsRowVersion();
+
                     b.HasIndex("AuthorId");
 
                     b.HasIndex("RequestedCurrencyId");

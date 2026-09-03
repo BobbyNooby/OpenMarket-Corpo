@@ -41,7 +41,7 @@ public static class ListingEndpoints
                 return Envelope.Error(400, "validation_failed", "Unknown orderType", "orderType");
             if (sort is not null && sort is not ("newest" or "ending_soon"))
                 return Envelope.Error(400, "validation_failed", "Unknown sort", "sort");
-            var (safeLimit, safeOffset) = (Math.Clamp(limit ?? 20, 1, 50), Math.Max(offset ?? 0, 0));
+            var (safeLimit, safeOffset) = (Math.Clamp(limit ?? 20, 1, 50), Math.Clamp(offset ?? 0, 0, 10_000));
             var query = db.Listings.AsNoTracking()
                 .Include(l => l.RequestedItem).Include(l => l.RequestedCurrency)
                 .Include(l => l.OfferedItems).ThenInclude(o => o.Item)
@@ -111,6 +111,19 @@ public static class ListingEndpoints
             var idemKey = ctx.Request.Headers["Idempotency-Key"].ToString();
             if (idemKey.Length > 100)
                 return Envelope.Error(400, "validation_failed", "Idempotency-Key too long", "Idempotency-Key");
+
+            // per-author cap: listings are the cheap raw material of the outbox
+            // — uncapped, one account loops create/PATCH and floods readiness
+            const int MaxListingsPerAuthor = 200;
+            if (await db.Listings.CountAsync(l => l.AuthorId == authorId) >= MaxListingsPerAuthor)
+                return Envelope.Error(409, "listing_cap_reached",
+                    $"At most {MaxListingsPerAuthor} active-or-historical listings per author");
+
+            // validate BEFORE the replay check: garbage enums answer 400, and a
+            // genuine replay passes validation unchanged
+            if (await ValidateAsync(db, body.Amount, body.OrderType, body.PayingType, body.ExpiresAt, body.Offered,
+                    body.RequestedItemId, body.RequestedCurrencyId) is { } verr) return verr;
+
             if (idemKey.Length > 0)
             {
                 var existing = await db.Listings.AsNoTracking()
@@ -133,9 +146,6 @@ public static class ListingEndpoints
                     return Results.Json(new { replay = true, listingId = existing.Id }, statusCode: 200);
                 }
             }
-
-            if (await ValidateAsync(db, body.Amount, body.OrderType, body.PayingType, body.ExpiresAt, body.Offered,
-                    body.RequestedItemId, body.RequestedCurrencyId) is { } verr) return verr;
 
             var listing = new Listing
             {
@@ -193,7 +203,18 @@ public static class ListingEndpoints
             foreach (var line in body.Offered) AddOfferedLine(db, listing, line);
             listing.UpdatedAt = DateTime.UtcNow;
             db.Outbox.Add(Outbox(listing.Id, "listing.updated", new { listingId = listing.Id, authorId = sub }));
-            await db.SaveChangesAsync();
+            try
+            {
+                await db.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                // the listing changed under us (accept sold it, the sweep
+                // expired it) — the stale editor gets a conflict, never a
+                // silent rewrite of a listing whose snapshot already froze
+                return Envelope.Error(409, "listing_conflict",
+                    "The listing changed while you were editing it — reload and retry");
+            }
             return Results.Json(new { listing.Id, listing.UpdatedAt });
         });
 
@@ -258,7 +279,14 @@ public static class ListingEndpoints
                 var existing = await db.Trades.AsNoTracking()
                     .FirstOrDefaultAsync(t => t.AcceptedById == accepterId && t.IdempotencyKey == effectiveKey);
                 if (existing is not null)
+                {
+                    // the key must belong to THIS listing — replaying listing A's
+                    // trade against listing B is a client bug, not a success
+                    if (existing.ListingId != id)
+                        return Envelope.Error(409, "idempotency_key_reused",
+                            "This Idempotency-Key was used for a different listing");
                     return Results.Json(new { replay = true, tradeId = existing.Id }, statusCode: 200);
+                }
             }
 
             var listing = await db.Listings
@@ -429,6 +457,11 @@ public static class ListingEndpoints
                 "A listing requests exactly one of: item or currency", "requestedItemId");
         if (expiresAt is { } exp)
         {
+            // no timezone offset binds as Unspecified — Npgsql rejects it on
+            // write with a 500; make it an honest 400 instead
+            if (exp.Kind == DateTimeKind.Unspecified)
+                return Envelope.Error(400, "validation_failed",
+                    "expiresAt must include a timezone offset", "expiresAt");
             if (exp <= DateTime.UtcNow)
                 return Envelope.Error(400, "validation_failed", "expiresAt must be in the future", "expiresAt");
             // per request, never a static: a process-lifetime horizon silently

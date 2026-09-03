@@ -44,7 +44,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-      - run: dotnet test
+      - run: dotnet test Catalogue.Tests
         working-directory: services/catalogue
 
   python-services:

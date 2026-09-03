@@ -155,6 +155,11 @@ public class CatalogueDbContext : DbContext
         b.Entity<Listing>().Property(x => x.OrderType).HasConversion<string>();
         b.Entity<Listing>().Property(x => x.PayingType).HasConversion<string>();
         b.Entity<Listing>().Property(x => x.Status).HasConversion<string>();
+        // optimistic concurrency via the postgres system column — a stale
+        // tracked update (e.g. PATCH racing accept's ExecuteUpdate) must
+        // conflict, never silently rewrite a sold listing behind the trade
+        // snapshot. xmin needs no migration; it exists on every row.
+        b.Entity<Listing>().Property<uint>("xmin").IsRowVersion();
         b.Entity<UserItemList>().Property(x => x.ListType).HasConversion<string>();
     }
 }

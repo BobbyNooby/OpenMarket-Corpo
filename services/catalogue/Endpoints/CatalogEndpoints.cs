@@ -96,7 +96,7 @@ public static class CatalogEndpoints
             if (body is null || string.IsNullOrWhiteSpace(body.Name))
                 return Envelope.Error(400, "validation_failed", "Name is required", "name");
 
-            var category = new ItemCategory { Name = body.Name.Trim(), Slug = await SlugFor(db(ctx), body.Name), IconUrl = body.ImageUrl };
+            var category = new ItemCategory { Name = body.Name.Trim(), Slug = await SlugFor(db(ctx), body.Name, "category"), IconUrl = body.ImageUrl };
             db(ctx).Categories.Add(category);
             try
             {
@@ -155,7 +155,7 @@ public static class CatalogEndpoints
             var currency = new Currency
             {
                 Name = body.Name.Trim(),
-                Slug = await SlugFor(db(ctx), body.Name),
+                Slug = await SlugFor(db(ctx), body.Name, "currency"),
                 Description = body.Description
             };
             db(ctx).Currencies.Add(currency);
@@ -213,7 +213,7 @@ public static class CatalogEndpoints
         return g;
     }
 
-    public static async Task<string> SlugFor(CatalogueDbContext db, string name)
+    public static async Task<string> SlugFor(CatalogueDbContext db, string name, string entity = "item")
     {
         // NFKC-normalized, URL-safe, immutable identifier
         var normalized = name.Normalize(System.Text.NormalizationForm.FormKC).ToLowerInvariant();
@@ -225,13 +225,26 @@ public static class CatalogEndpoints
         if (slug.Length == 0) slug = "item";
         slug = slug.Length > 64 ? slug[..64].TrimEnd('-') : slug;
 
-        var taken = await db.Items.AnyAsync(i => i.Slug == slug);
+        // probe the table the slug will actually live in — a category colliding
+        // with an item's name is fine; one colliding with another category is not
+        var taken = entity switch
+        {
+            "category" => await db.Categories.AnyAsync(c => c.Slug == slug),
+            "currency" => await db.Currencies.AnyAsync(c => c.Slug == slug),
+            _ => await db.Items.AnyAsync(i => i.Slug == slug),
+        };
         // per-table uniqueness is what matters; cross-table sharing is fine
         if (!taken) return slug;
         for (var n = 2; n < 50; n++)
         {
             var candidate = $"{slug}-{n}";
-            if (!await db.Items.AnyAsync(i => i.Slug == candidate)) return candidate;
+            taken = entity switch
+            {
+                "category" => await db.Categories.AnyAsync(c => c.Slug == candidate),
+                "currency" => await db.Currencies.AnyAsync(c => c.Slug == candidate),
+                _ => await db.Items.AnyAsync(i => i.Slug == candidate),
+            };
+            if (!taken) return candidate;
         }
         return $"{slug}-{Guid.NewGuid().ToString()[..8]}";
     }
