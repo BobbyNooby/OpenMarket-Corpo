@@ -1,11 +1,9 @@
 spring:
   application:
     name: admin
-  datasource:
-    url: jdbc:${DATABASE_URL:postgresql://localhost:5432/admin_db}
-    username: om
-    password: ${POSTGRES_PASSWORD:devpassword123}
-    driver-class-name: org.postgresql.Driver
+  # datasource comes from DatabaseConfig (libpq-style DATABASE_URL) — a
+  # bare jdbc:${DATABASE_URL} prefix produces jdbc:postgres://... which the
+  # JDBC driver rejects (surfaced on admin's first real boot)
   jpa:
     hibernate:
       ddl-auto: validate
@@ -17,7 +15,10 @@ spring:
 management:
   endpoints:
     web:
-      exposure: health
+      exposure:
+        # exposure is a map (include/exclude) — a bare scalar fails the
+        # property bind at boot (surfaced on admin's first real start)
+        include: health
   endpoint:
     health:
       # never: the actuator payload can name DB hosts/users — the app's own

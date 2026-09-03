@@ -97,9 +97,14 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      internal:
-        # Pinned so auth can trust exactly this host's X-Forwarded-For.
-        ipv4_address: 10.200.200.10
+      # The gateway is the ONLY member of `edge` (a /30 has room for one
+      # container besides Docker's own gateway address). Auth trusts
+      # X-Forwarded-For from that whole subnet — network membership IS the
+      # trust, so no other service can ever race the gateway for its address
+      # (the old single-pinned-IP design lost that race under restart churn).
+      edge:
+        ipv4_address: 10.201.0.2
+      internal: ~
 
   auth:
     build:
@@ -121,8 +126,9 @@ services:
       # Internal gRPC (IntrospectToken) — unpublished, compose net only.
       GRPC_SERVER_PORT: 9090
       GRPC_INTERNAL_SECRET: ${GRPC_INTERNAL_SECRET:-dev-internal-secret}
-      # Trust X-Forwarded-For ONLY from the pinned gateway address.
-      AUTH_TRUSTED_PROXY_IP: 10.200.200.10/32
+      # Trust X-Forwarded-For ONLY from the `edge` network, whose sole
+      # member is the gateway (see the gateway's networks block).
+      AUTH_TRUSTED_PROXY_IP: 10.201.0.2/32
       # Drain the transactional outbox to Kafka (events phase). The relay
       # stays off unless this is set — prod opts in explicitly too.
       AUTH_OUTBOX_RELAY: "true"
@@ -140,7 +146,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    networks: [internal]
+    networks:
+      internal: ~
+      edge:
+        ipv4_address: 10.201.0.3
 
   catalogue:
     build:
@@ -177,6 +186,7 @@ services:
       dockerfile: Dockerfile
     environment:
       DATABASE_URL: postgres://om:${POSTGRES_PASSWORD:-devpassword123}@postgres:5432/messaging_db
+      DATABASE_SSLMODE: disable
       # WS validation + identity: verifies caller JWTs against auth's JWKS
       AUTH_URL: http://auth:8080
       # the dev frontend's origins; prod passes its own list
@@ -235,6 +245,7 @@ services:
       dockerfile: Dockerfile
     environment:
       DATABASE_URL: postgres://om:${POSTGRES_PASSWORD:-devpassword123}@postgres:5432/admin_db
+      DATABASE_SSLMODE: disable
       KAFKA_BROKERS: kafka:9092
       OTLP_ENDPOINT: http://jaeger:4318
     depends_on:
@@ -255,8 +266,12 @@ volumes:
 networks:
   internal:
     driver: bridge
-    # Fixed subnet so AUTH_TRUSTED_PROXY_IP can pin the gateway's address —
-    # X-Forwarded-For is trusted from exactly one container, not the whole net.
+  # Tiny edge network with every member pinned: gateway=.2, auth=.3 (Docker's
+  # own gateway is .1). Auth trusts XFF from 10.201.0.2/32 — the only host on
+  # `edge` besides itself — so the trust is a network fact, not an
+  # address-pinning hope that other containers can race for.
+  edge:
+    driver: bridge
     ipam:
       config:
-        - subnet: 10.200.200.0/24
+        - subnet: 10.201.0.0/29

@@ -123,9 +123,16 @@
         </dependency>
         <dependency>
             <!-- Kafka producer for the transactional outbox relay (events
-                 phase): publishes only what a business tx already committed. -->
+                 phase): publishes only what a business tx already committed.
+                 Boot 4 split the autoconfiguration into this module —
+                 spring-kafka alone provides no KafkaTemplate bean (found
+                 the hard way: the compose bring-up failed fast). -->
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-kafka</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

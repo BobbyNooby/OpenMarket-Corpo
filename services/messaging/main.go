@@ -42,6 +42,15 @@ func main() {
 		logger.Error("DATABASE_URL is required")
 		os.Exit(1)
 	}
+	// lib/pq defaults to sslmode=require for non-localhost hosts —
+	// container-to-container Postgres has no TLS (same posture as auth).
+	if ssl := os.Getenv("DATABASE_SSLMODE"); ssl != "" {
+		sep := "?"
+		if strings.Contains(dbURL, "?") {
+			sep = "&"
+		}
+		dbURL += sep + "sslmode=" + ssl
+	}
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		logger.Error("bad DATABASE_URL", "err", err)
