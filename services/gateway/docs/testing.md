@@ -2,9 +2,9 @@
 
 > [gateway](../README.md) › Testing
 
-17 Go tests across four packages, plus the gateway's slice of the fleet
+27 Go tests across eight packages, plus the gateway's slice of the fleet
 flow-test (§14, 15 steps). `go vet ./...` is part of the gate — run
-`go test ./... && go vet ./...` from `services/gateway`.
+`go test -count=1 ./... && go vet ./...` from `services/gateway`.
 
 ## The layers
 
@@ -14,6 +14,10 @@ flow-test (§14, 15 steps). `go vet ./...` is part of the gate — run
 | Verdict cache unit | `internal/middleware/cache_test.go` (3) | TTL expiry, hard cap, per-token isolation |
 | Proxy unit | `internal/proxy/proxy_test.go` (3) | planted XFF never arrives upstream, planted identity headers stripped, dead upstream → 502 envelope |
 | Routing integration | `internal/upstream/auth/auth_test.go` (2) | all three auth families + jwks proxy correctly, stubs cannot shadow real mounts, cache serves the second request |
+| Blocklist unit | `internal/blocklist/blocklist_test.go` (8) | banned→blocked (TTL for temp bans, expired bans skipped), unban/delete→unblocked, malformed events rejected, roles_changed ignored, store outage fails open, unverified-sub extraction |
+| Blocklist middleware | `internal/middleware/blocklist_test.go` (3) | blocked sub → 401 with ZERO introspection calls; Redis outage fails open into introspection; unblocked flows normally |
+| Blocklist consumer | `internal/blocklist/consumer.go` via `main.go` | group `gateway-blocklist` on user.banned/unbanned/deleted (verified live against compose Kafka) |
+| Messaging mount | `internal/upstream/messaging/mount_test.go` (2) | /api/v1/messaging/* + /ws route through with XFF overwritten; sibling namespaces unrouted |
 | Stub contract | `internal/upstream/stub/stub_test.go` (1) | 501 envelope names the service |
 | End-to-end | `services/auth/scripts/flow-test.sh` §14 (15 steps) | the real chain: register → login → me → refresh through `:3000`, edge 401 on forged tokens, banned user's pre-ban token dies at the edge, XFF spoof resistance, stub/404 semantics |
 

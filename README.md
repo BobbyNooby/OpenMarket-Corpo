@@ -44,7 +44,7 @@ build; v2 ships its own live URL.
 | API Gateway / BFF | Go | — | Public entry, WS termination, JWT session check, rate limit, routing, UI-shaped DTO aggregation |
 | Auth & Users | Java Spring Boot | `auth_db` | Discord OAuth + email/password, JWT issue, RBAC (4 roles / 38 perms), bans/warnings, profiles, reviews + trust score |
 | Catalogue & Listings | C# ASP.NET Core | `catalogue_db` | Items, currencies, categories, listings, multi-item offers, trades, search, watchlist, expiry scheduler |
-| Messaging (chat) | Go | `messaging_db` | Conversations, messages, typing indicators, unread tracking, per-conversation WS fan-in/out |
+| Messaging (chat) | Go | `messaging_db` | Conversations, messages, unread tracking, participant-scoped REST + server→client WS pushes (Origin-allowlisted), JWT-validated via auth JWKS |
 | Presence & Notifications | Python FastAPI | `notif_db` + Redis | Online status, WS fan-out (Redis pub/sub), 7 notification types |
 | Assets & Images | Python FastAPI | `asset_db` + **MinIO** (S3-compatible) | Uploads, resize/WebP (Pillow), OG previews, media library |
 | Admin & Moderation | Java Spring Boot | `admin_db` | Reports (CRUD/resolve), audit log, site config/theme, analytics ingestion + admin insights |
@@ -109,8 +109,8 @@ with language-neutral protocols:
 | Browser | Gateway | REST + WS | JSON |
 | Gateway | Auth / Catalogue / Admin | **gRPC** (HTTP/2) | protobuf — **live for auth** (`IntrospectToken`, the gateway's edge check); catalogue/admin pending |
 | Gateway | Messaging / Presence | WS / HTTP | JSON |
-| Messaging | Kafka | publish | protobuf |
-| Presence / Admin | Kafka | subscribe | protobuf |
+| Messaging | Kafka | publish | (deferred until presence consumes `message.created` — no producers without consumers) |
+| Gateway | Kafka | consume | `user.banned/unbanned/deleted` → Redis edge blocklist (live) |
 | All services | Docker / K8s probes | HTTP | — |
 
 The gateway is the **only** public entry point: it terminates WebSockets, fans
@@ -194,7 +194,12 @@ full OWASP-grounded security audit with every finding remediated
   REST until its slice migrates *(auth shipped & audited; **gateway live** —
   REST proxying + gRPC edge auth, see [gateway README](services/gateway/README.md);
   **catalogue live** — domain, listings/trades with idempotent FCFS accept,
-  wired through the gateway; audit-hardened, 30 green tests)*
+  wired through the gateway; audit-hardened, 31 green tests)**
+
+  **Messaging (Phase 2, slice 1) live** — conversations + messages + WS
+  pushes through the gateway; auth's transactional outbox has a relay
+  (user events reach Kafka), and the gateway consumes bans into a Redis
+  edge blocklist
 - **Phase 2** — Messaging (Go) + Presence/Notifications (Python) over WS — full
   chat flow traced
 - **Phase 3** — Fill the domain: reputation, assets/images, admin/moderation,
