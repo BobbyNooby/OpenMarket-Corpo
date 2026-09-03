@@ -51,7 +51,7 @@ Shipped (see `Endpoints/` — all under `/api/v1/catalogue`):
   depth exceeds 10k.
 - **Me:** watchlist (cap 500, ban-gated writes), have/want item-lists
   (cap 200), my trades, my listings.
-- **Tests:** 30 xUnit tests (Testcontainers Postgres + WebApplicationFactory)
+- **Tests:** 31 xUnit tests (Testcontainers Postgres + WebApplicationFactory)
   — CI runs `dotnet test Catalogue.Tests` explicitly.
 
 ## Local dev

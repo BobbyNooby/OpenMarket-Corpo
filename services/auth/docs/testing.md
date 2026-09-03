@@ -3,7 +3,7 @@
 > [auth](../README.md) › Testing
 
 How the test suite is structured, what each test *pins*, and how to extend it.
-Run everything with `mvn test` (≈140 tests, a few seconds total).
+Run everything with `mvn test` (213 tests, ~1 min total).
 
 ## Contents
 
@@ -55,6 +55,7 @@ consume, so that should be a deliberate decision, never an accident.
 | `auth/AuthServiceCredentialTest` | add-only-once (`password_exists`); hash stored ≠ raw; change without password → `password_not_set`; wrong current → `invalid_credentials`; happy change → hash replaced **and other devices revoked** (`revokeAllForUserExcept`); remove → `password_not_set` / wrong current / `last_login_method` (no OAuth left) / happy delete |
 | `oauth/OAuthStateServiceTest` | the OAuth CSRF defense: issue→validate roundtrip; query-param ↔ cookie must match; tampered payload/signature rejected (HMAC); garbage rejected *silently*; expired state rejected |
 | `oauth/DiscordClientTest` | talks to **MockWebServer playing Discord** with real-schema payloads: code exchange posts form-urlencoded with `grant_type/client_id/client_secret` (Discord rejects JSON!) and parses `access_token`; `/users/@me` parses snowflake-string id, snake_case `global_name`, **ignores unknown fields**; HTTP errors → `oauth_failed`; unverified/missing email never trusted; authorize URL contains `response_type/client_id/scope/redirect_uri/state` |
+| `events/OutboxRelayTest` | the relay contract: pending rows published to their topic **keyed by user id** then stamped `published_at`; a failed send stops the batch (per-user order) and stamps nothing; an unacknowledged send times out and stays pending; drained outbox = no calls; retention deletes rows relayed before the 7-day cutoff |
 | `user/UserServiceTest` | `me()` maps JSON-string columns → typed maps; `loginMethods` aggregation (password flag + sorted providers); malformed stored JSON degrades to empty maps instead of 500; partial PATCH semantics (null = untouched); username conflict → `username_taken`+`field`; delete → sets `deleted_at` **and** revokes all sessions |
 
 ## The fixtures

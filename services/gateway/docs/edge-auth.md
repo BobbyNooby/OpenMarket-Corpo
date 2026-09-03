@@ -50,12 +50,17 @@ two same-token requests).
 
 ### The ban-propagation window
 
-A fresh ban reaches the edge within **10 seconds** (cache TTL), not
-instantly. Auth's protected REST routes re-validate the token
-cryptographically only — ban enforcement for already-issued tokens lives at
-the edge plus at login/refresh. This is a documented, bounded gap, pinned
-end-to-end by flow-test §14's *banned user's pre-ban token* step: removing
-the edge middleware turns that step red.
+Two layers, two clocks:
+
+1. **Blocklist (event-driven, ~seconds)** — auth's outbox relay publishes
+   `user.banned`; the gateway's `gateway-blocklist` consumer writes Redis;
+   the edge check answers 401 for blocked subs *before* introspection. A
+   Redis outage fails open into layer 2 (the blocklist is an optimization,
+   never the authority).
+2. **Introspection cache (≤10s TTL)** — auth reports `active=false` for
+   banned users, so even a blocklist miss dies at the edge within one cache
+   TTL. Pinned end-to-end by flow-test §14's *banned user's pre-ban token*
+   step: removing the edge middleware turns that step red.
 
 ## Connection lifecycle
 

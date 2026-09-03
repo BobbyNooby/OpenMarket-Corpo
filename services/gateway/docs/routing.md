@@ -9,7 +9,7 @@
 | `/api/v1/auth/`, `/api/v1/users/`, `/api/v1/admin/` (+ bare `/api/v1/auth`) | auth `:8080` | yes | — |
 | `/.well-known/jwks.json` | auth | public | — |
 | `/api/v1/catalogue/` | catalogue `:8081` | none — upstream enforces | catalogue's own 401/403/503 envelopes |
-| `/api/v1/messaging/` | stub | — | `501 not_deployed` |
+| `/api/v1/messaging/` + `/ws` | live (messaging) | edge | chat REST + WS pushes; upstream validates JWTs itself |
 | `/api/v1/presence/` | stub | — | `501 not_deployed` |
 | `/api/v1/assets/` | stub | — | `501 not_deployed` |
 | `/api/` and `/api` | — | — | `404 not_found` |

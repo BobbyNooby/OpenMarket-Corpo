@@ -194,14 +194,13 @@ full OWASP-grounded security audit with every finding remediated
   REST until its slice migrates *(auth shipped & audited; **gateway live** —
   REST proxying + gRPC edge auth, see [gateway README](services/gateway/README.md);
   **catalogue live** — domain, listings/trades with idempotent FCFS accept,
-  wired through the gateway; audit-hardened, 31 green tests)**
-
-  **Messaging (Phase 2, slice 1) live** — conversations + messages + WS
-  pushes through the gateway; auth's transactional outbox has a relay
-  (user events reach Kafka), and the gateway consumes bans into a Redis
-  edge blocklist
+  wired through the gateway; audit-hardened, 31 green tests)*
 - **Phase 2** — Messaging (Go) + Presence/Notifications (Python) over WS — full
-  chat flow traced
+  chat flow traced *(**messaging live** — conversations, messages, unread,
+  and WS pushes through the gateway, ported from v1; auth's transactional
+  outbox now has a relay — user events reach Kafka — and the gateway
+  consumes bans into a Redis edge blocklist; presence is next, as the
+  first event consumer)*
 - **Phase 3** — Fill the domain: reputation, assets/images, admin/moderation,
   GDPR saga
 - **Phase 4** — Infra fast-follow: remaining internal gRPC (catalogue + admin;

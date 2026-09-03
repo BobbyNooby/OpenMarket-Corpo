@@ -33,6 +33,9 @@ route guards, server components forward cookies to gateway endpoints
 ```bash
 make frontend            # from repo root — dev server on http://localhost:5173
 # or: cd frontend && npm run dev
+#
+# /dev is a raw API harness (dev-only): it 404s in production builds and
+# ships no pre-filled credentials — pinned in src/app/dev/page.test.tsx.
 ```
 
 Port is **5173** (v1 parity). The gateway owns :3000.

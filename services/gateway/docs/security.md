@@ -64,8 +64,11 @@ polls auth health for 10s, logs a warning, and serves anyway.
   network, secret-guarded. mTLS lands with the mesh/K8s work.
 - **No gateway-side rate limiting yet** — auth throttles its own sensitive
   endpoints; fleet-wide limiting is a roadmap item (Redis-backed).
-- **No Redis blocklist consumption yet** — the ≤10s cache window plus
-  auth's login/refresh ban checks are the interim control.
-- **WebSocket termination** — `FlushInterval: -1` and upgrade passthrough
-  are already in the factory, but no WS routes exist yet (presence is first).
+- **Redis blocklist (live, 2026-09)** — the gateway consumes auth's
+  `user.banned/unbanned/deleted` events into Redis and 401s blocked subs
+  before introspection; a Redis outage fails open into introspection
+  (which remains the authority). See `internal/blocklist`.
+- **WebSocket termination (live, 2026-09)** — `/ws` proxies to messaging
+  behind the edge check; messaging enforces its own Origin allowlist on
+  the upgrade (CSWSH guard). Fleet-wide rate limiting remains deferred.
 - **Swagger/docs are not proxied** — internal tooling stays internal.

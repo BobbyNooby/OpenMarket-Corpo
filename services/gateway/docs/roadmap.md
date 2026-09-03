@@ -22,9 +22,9 @@
 
 | Item | Why / when it arrives |
 |---|---|
-| **WebSocket termination** (presence) | `FlushInterval: -1` + upgrade passthrough are already in the proxy factory; the WS fan-out protocol lands with presence (Phase 2). Auth at upgrade time only — cookie introspected once, not per frame. |
+| ~~WebSocket termination~~ **LIVE (messaging)** | `/ws` rides the proxy passthrough; edge-checked at upgrade like any GET. Presence's WS fan-out (Redis) still lands with Phase 2. |
 | **Fleet rate limiting + idempotency keys** (Redis) | auth throttles its own sensitive endpoints today; fleet-wide limiting needs the Redis cache layer and per-route budgets (Phase 4 infra fast-follow) |
-| **JWT blocklist consumption** (Redis) | the design's answer to the ≤15-min access-token window after a ban; arrives with the gateway's Redis wiring — until then the edge introspection cache (≤10s) plus auth's login/refresh checks cover it |
+| ~~JWT blocklist consumption~~ **LIVE (2026-09)** | `internal/blocklist` consumes auth's ban events into Redis; edge 401s blocked subs before introspection, fail-open on Redis errors |
 | **mTLS on the auth gRPC hop** | plaintext h2c + shared secret + unpublished port is the staged posture; mTLS arrives with K8s/mesh (Phase 5) |
 | **Catalogue/Admin over gRPC** | both still REST-proxied; each endpoint migrates per the hybrid-transport path in [architecture.md](architecture.md#transport-decisions-and-the-one-honest-deviation) |
 | **BFF DTO aggregation** (`/api/v1/me` joining auth + reputation) | depends on `GetUser` RPC (declared, UNIMPLEMENTED) and the reputation domain — the proto comment reserves the seam |

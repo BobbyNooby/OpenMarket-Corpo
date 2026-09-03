@@ -131,7 +131,7 @@ ownership is enforced server-side by the token's `sub`.
 - Bans: active ban (not lifted, not expired) blocks login AND refresh with
   `403 account_banned`; banning revokes every live session. The residual
   ≤15-min access-token window is closed fleet-wide by the gateway's Redis
-  blocklist fed by the `user.banned` outbox event (wiring pending).
+  blocklist fed by the `user.banned` outbox event — relay + consumer are live (2026-09); ban propagation is event-driven.
 
 ## Known gaps / future work
 

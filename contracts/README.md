@@ -28,6 +28,20 @@ Change flow: edit the `.proto` → run `./generate.sh` → commit the schema
 *and* the regenerated stubs in the same PR → implement both sides. Schema
 diffs are API diffs — review them like one.
 
+## REST + event contracts
+
+- `openapi/messaging.v1.yaml` — the messaging service's REST surface and
+  its WebSocket push envelope (the shape every chat client codes against).
+- `proto/openmarket/events/v1/user_events.proto` — auth's domain events
+  (`user.banned`, `user.unbanned`, `user.roles_changed`, `user.deleted`),
+  carried on the transactional outbox and relayed to Kafka. Wire format is
+  proto3-shaped JSON until the Schema Registry lands (Phase 4); consumers
+  must be idempotent — the relay is at-least-once.
+
+Service claims live or die with these files: if a service publishes or
+serves something that isn't a contract here, either add the contract or
+remove the claim.
+
 ## Rules
 
 - Packages are versioned (`openmarket.auth.v1`) and directories must match
