@@ -120,6 +120,9 @@ services:
       GRPC_INTERNAL_SECRET: ${GRPC_INTERNAL_SECRET:-dev-internal-secret}
       # Trust X-Forwarded-For ONLY from the pinned gateway address.
       AUTH_TRUSTED_PROXY_IP: 10.200.200.10/32
+      # Drain the transactional outbox to Kafka (events phase). The relay
+      # stays off unless this is set — prod opts in explicitly too.
+      AUTH_OUTBOX_RELAY: "true"
       # dev convenience: interactive API docs are deny-by-default now
       AUTH_DOCS_PUBLIC: "true"
       # container-to-container Postgres has no TLS — the sslmode=require

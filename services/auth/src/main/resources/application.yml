@@ -17,6 +17,10 @@ spring:
     host: ${MAIL_HOST:}
     port: ${MAIL_PORT:1025}
     from: ${MAIL_FROM:OpenMarket <no-reply@openmarket.dev>}
+  kafka:
+    # Producer for the transactional outbox relay only — auth publishes no
+    # other Kafka traffic. The relay itself stays off unless explicitly on.
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
 
 management:
   endpoints:
@@ -61,6 +65,14 @@ auth:
   verification:
     email-verify-hours: 24
     password-reset-minutes: 60
+  outbox:
+    # Off by default: a prod deploy without Kafka must not silently hold
+    # events. Compose (the dev environment) turns it on explicitly.
+    relay: ${AUTH_OUTBOX_RELAY:false}
+    poll-ms: ${AUTH_OUTBOX_POLL_MS:2000}
+    send-timeout-ms: ${AUTH_OUTBOX_SEND_TIMEOUT_MS:5000}
+    retention-days: ${AUTH_OUTBOX_RETENTION_DAYS:7}
+    retention-cron: ${AUTH_OUTBOX_RETENTION_CRON:0 17 4 * * *}
 
 discord:
   client-id: ${DISCORD_CLIENT_ID:}

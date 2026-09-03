@@ -35,8 +35,10 @@ public class HealthController {
             jdbc.queryForObject("SELECT 1", Integer.class);
             return ResponseEntity.ok(Map.of("status", "ready"));
         } catch (Exception e) {
+            // fixed string on purpose: this endpoint is public, and the raw
+            // JDBC message would disclose DB hosts/users to the internet
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                .body(Map.of("status", "error", "error", String.valueOf(e.getMessage())));
+                .body(Map.of("status", "error", "error", "postgres unreachable"));
         }
     }
 }

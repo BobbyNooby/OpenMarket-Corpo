@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package openmarket.events.v1;
+
+// Auth & Users domain events, carried on the transactional outbox
+// (auth_db.auth.outbox_events) and relayed to Kafka by the outbox relay.
+//
+// Wire format: until the Schema Registry lands (Phase 4), events are
+// published as JSON whose fields match the message schemas below
+// (lowerCamelCase keys, proto3 JSON mapping). The Kafka message key is the
+// user id, so per-user ordering is preserved within a topic partition.
+//
+// Consumers MUST be idempotent: the relay is at-least-once, and a Kafka
+// redelivery after a relay crash replays events that were already handled.
+
+// Emitted when an admin bans a user (topic: user.banned)
+message UserBanned {
+  string user_id = 1;    // banned user's UUID
+  string reason = 2;     // "" when the admin gave no reason
+  string banned_by = 3;  // acting admin's UUID
+  optional string expires_at = 4;  // RFC-3339; absent = permanent ban
+}
+
+// Emitted when a ban is lifted (topic: user.unbanned)
+message UserUnbanned {
+  string user_id = 1;
+}
+
+// Emitted when a user's role set changes (topic: user.roles_changed)
+message UserRolesChanged {
+  string user_id = 1;
+  repeated string new_roles = 2;
+}
+
+// Emitted when a user self-deletes (erased=false, soft delete with email
+// freed) or an admin performs the GDPR erase (erased=true) — topic:
+// user.deleted. Downstream services must drop/anonymize every projection
+// they hold for this user.
+message UserDeleted {
+  string user_id = 1;
+  bool erased = 2;
+}
