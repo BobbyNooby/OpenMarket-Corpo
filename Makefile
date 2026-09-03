@@ -78,6 +78,8 @@ test:
 	cd services/auth && mvn -q test
 	@echo "=== dotnet tests (catalogue) ==="
 	cd services/catalogue && dotnet test Catalogue.Tests
+	@echo "=== frontend tests (next.js) ==="
+	cd frontend && npm ci && npm test
 	@echo "All tests passed."
 
 lint:
@@ -91,4 +93,6 @@ lint:
 	cd services/auth && mvn -q compile
 	@echo "=== dotnet build (catalogue) ==="
 	cd services/catalogue && dotnet build
+	@echo "=== frontend lint+build (next.js) ==="
+	cd frontend && npm ci && npm run lint && npm run build
 	@echo "All lint passed."

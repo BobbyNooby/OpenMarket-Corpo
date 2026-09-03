@@ -3,10 +3,10 @@
 // Raw API harness: exercises the full chain — rewrite → gateway →
 // gRPC edge introspection → auth → Postgres — with nothing hidden.
 // Deliberately unpolished: raw statuses and JSON bodies ARE the feature.
+// Request shapes live in src/lib/dev-api.ts (tested there).
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-
-type Call = { name: string; status: number | null; body: string };
+import { call, devCalls, type Call, type CallSpec } from "@/lib/dev-api";
 
 const inputClass = "border rounded px-2 py-1 text-sm bg-background";
 
@@ -16,32 +16,8 @@ export default function DevPage() {
   const [name, setName] = useState("Garen Crownguard");
   const [calls, setCalls] = useState<Call[]>([]);
 
-  async function call(name: string, path: string, init?: RequestInit) {
-    try {
-      const res = await fetch(path, {
-        ...init,
-        headers: { "Content-Type": "application/json" },
-      });
-      const text = await res.text();
-      let pretty = text;
-      try {
-        pretty = JSON.stringify(JSON.parse(text), null, 2);
-      } catch {
-        // empty or non-JSON body — show it raw
-      }
-      setCalls((prev) => [
-        { name, status: res.status, body: pretty || "(empty body)" },
-        ...prev,
-      ]);
-    } catch (e) {
-      setCalls((prev) => [
-        { name, status: null, body: String(e) },
-        ...prev,
-      ]);
-    }
-  }
-
-  const json = (body: unknown) => JSON.stringify(body);
+  const run = (spec: CallSpec) =>
+    call((c) => setCalls((prev) => [c, ...prev]), fetch, spec);
 
   return (
     <main className="max-w-2xl mx-auto p-6 space-y-4 font-mono text-sm">
@@ -76,48 +52,23 @@ export default function DevPage() {
       <div className="flex flex-wrap gap-2">
         <Button
           variant="outline"
-          onClick={() =>
-            call(
-              "register",
-              "/api/v1/auth/register",
-              { method: "POST", body: json({ email, password, name }) },
-            )
-          }
+          onClick={() => run(devCalls(email, password, name).register)}
         >
           register
         </Button>
         <Button
           variant="outline"
-          onClick={() =>
-            call(
-              "login",
-              "/api/v1/auth/login",
-              { method: "POST", body: json({ email, password }) },
-            )
-          }
+          onClick={() => run(devCalls(email, password, name).login)}
         >
           login
         </Button>
-        <Button
-          variant="outline"
-          onClick={() => call("me", "/api/v1/users/me")}
-        >
+        <Button variant="outline" onClick={() => run(devCalls(email, password, name).me)}>
           me
         </Button>
-        <Button
-          variant="outline"
-          onClick={() =>
-            call("refresh", "/api/v1/auth/refresh", { method: "POST" })
-          }
-        >
+        <Button variant="outline" onClick={() => run(devCalls(email, password, name).refresh)}>
           refresh
         </Button>
-        <Button
-          variant="outline"
-          onClick={() =>
-            call("logout", "/api/v1/auth/logout", { method: "POST" })
-          }
-        >
+        <Button variant="outline" onClick={() => run(devCalls(email, password, name).logout)}>
           logout
         </Button>
       </div>

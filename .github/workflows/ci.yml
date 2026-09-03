@@ -47,6 +47,23 @@ jobs:
       - run: dotnet test Catalogue.Tests
         working-directory: services/catalogue
 
+  frontend:
+    name: frontend (next.js)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run lint
+        working-directory: frontend
+      - run: npm test
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+
   python-services:
     name: python (presence, assets)
     runs-on: ubuntu-latest
