@@ -16,5 +16,15 @@ protoc \
   --go-grpc_opt=module=github.com/openmarket-corpo/gateway \
   proto/openmarket/auth/v1/auth.proto
 
+# C# stubs for the catalogue service (committed alongside the Go ones).
+# protoc-gen-grpc-csharp ships inside the Grpc.Tools nuget package:
+#   ~/.nuget/packages/grpc.tools/<ver>/tools/<platform>/grpc_csharp_plugin
+GRPC_CSHARP_PLUGIN="${GRPC_CSHARP_PLUGIN:-$HOME/.nuget/packages/grpc.tools/2.72.0/tools/macosx_x64/grpc_csharp_plugin}"
+protoc \
+  --csharp_out=../services/catalogue/AuthGrpc \
+  --grpc_out=../services/catalogue/AuthGrpc \
+  --plugin=protoc-gen-grpc="$GRPC_CSHARP_PLUGIN" \
+  proto/openmarket/auth/v1/auth.proto
+
 echo "generated:"
-find ../services/gateway/internal/authpb -type f
+find ../services/gateway/internal/authpb ../services/catalogue/AuthGrpc -type f

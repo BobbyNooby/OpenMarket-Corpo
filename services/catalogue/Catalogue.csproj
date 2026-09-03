@@ -29,10 +29,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- shared contract — single source of truth from contracts/ -->
-    <Protobuf Include="../../contracts/proto/openmarket/auth/v1/auth.proto"
-              GrpcServices="Client"
-              Link="Auth/auth.proto" />
+    <!-- gRPC stubs are generated from contracts/ and committed (AuthGrpc/)
+         — CI never needs protoc; regenerate via contracts/generate.sh -->
   </ItemGroup>
 
 </Project>
