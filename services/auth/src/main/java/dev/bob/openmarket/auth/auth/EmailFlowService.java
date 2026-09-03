@@ -33,8 +33,8 @@ public class EmailFlowService {
     // Delivery runs OFF the request thread: a slow relay must not extend the
     // response of always-quiet flows (known vs unknown address timing is the
     // enumeration oracle). Daemon threads — the JVM's shutdown need not wait.
-    // Tests inject a same-thread executor via reflection for determinism.
-    private java.util.concurrent.Executor mailExecutor =
+    // Package-private: tests swap in a same-thread executor for determinism.
+    java.util.concurrent.Executor mailExecutor =
         java.util.concurrent.Executors.newFixedThreadPool(2, r -> {
             Thread t = new Thread(r, "auth-mail");
             t.setDaemon(true);

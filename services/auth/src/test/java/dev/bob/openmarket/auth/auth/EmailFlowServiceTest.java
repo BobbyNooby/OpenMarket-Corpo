@@ -57,6 +57,8 @@ class EmailFlowServiceTest {
     void setUp() {
         service = new EmailFlowService(users, credentials, verifications, refreshTokens,
             email, rateLimiter, new BCryptPasswordEncoder(10), "http://localhost:3000");
+        // deterministic delivery: same-thread instead of the daemon pool
+        service.mailExecutor = Runnable::run;
     }
 
     private User user(boolean verified) {
@@ -239,6 +241,36 @@ class EmailFlowServiceTest {
         assertThatCode(() -> service.forgotPassword("sylas@mage-underground.org", null))
             .doesNotThrowAnyException();
         verify(email, org.mockito.Mockito.never()).send(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void forgotPassword_delivers_only_after_commit() {
+        // production path: inside @Transactional, delivery is registered as
+        // an afterCommit synchronization — it must NOT fire mid-transaction
+        when(users.findByEmail("garen@demaciabook.com"))
+            .thenReturn(Optional.of(user(true)));
+        when(verifications.issue(TestUsers.USER_ID, VerificationService.TYPE_PASSWORD_RESET,
+            "garen@demaciabook.com")).thenReturn("reset-token");
+
+        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.forgotPassword("garen@demaciabook.com", "1.2.3.4");
+
+            // still inside the transaction: nothing delivered yet
+            verify(email, org.mockito.Mockito.never()).send(anyString(), anyString(), anyString());
+
+            for (org.springframework.transaction.support.TransactionSynchronization s :
+                (Iterable<org.springframework.transaction.support.TransactionSynchronization>)
+                    org.springframework.transaction.support.TransactionSynchronizationManager
+                        .getSynchronizations()) {
+                s.afterCommit();
+            }
+            verify(email).send(eq("garen@demaciabook.com"), contains("reset"),
+                contains("/reset-password?token=reset-token"));
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 
     @Test

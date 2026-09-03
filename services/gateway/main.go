@@ -70,6 +70,10 @@ type systemProber struct {
 	cached HealthResponse
 	code   int
 	at     time.Time
+	// probing: a refresh is in flight; concurrent callers get the stale
+	// snapshot instead of queueing behind the probe (serve-stale-while-
+	// revalidate).
+	probing bool
 }
 
 const healthSnapshotTTL = 5 * time.Second
@@ -96,14 +100,29 @@ func newSystemProber(authHealth healthChecker, secret string) *systemProber {
 
 func (s *systemProber) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if time.Since(s.at) < healthSnapshotTTL {
-		writeHealth(w, s.code, s.cached)
+	fresh := time.Since(s.at) < healthSnapshotTTL
+	if fresh || s.probing {
+		// Fresh snapshot — or a concurrent refresh is already in flight.
+		// Serve (possibly stale) immediately instead of piling up behind
+		// the probe: this endpoint must answer even when upstreams hang.
+		hr, code := s.cached, s.code
+		s.mu.Unlock()
+		writeHealth(w, code, hr)
 		return
 	}
-	s.cached, s.code = s.probe(r)
-	s.at = time.Now()
-	writeHealth(w, s.code, s.cached)
+	s.probing = true
+	s.mu.Unlock()
+
+	// Probes run on a background context on purpose: this is cache
+	// refresh, not request work. Parenting on r.Context() would let a
+	// client disconnect cancel the round and poison the snapshot with an
+	// all-unreachable report for a full TTL.
+	hr, code := s.probe()
+
+	s.mu.Lock()
+	s.cached, s.code, s.at, s.probing = hr, code, time.Now(), false
+	s.mu.Unlock()
+	writeHealth(w, code, hr)
 }
 
 func writeHealth(w http.ResponseWriter, code int, hr HealthResponse) {
@@ -112,10 +131,10 @@ func writeHealth(w http.ResponseWriter, code int, hr HealthResponse) {
 	json.NewEncoder(w).Encode(hr)
 }
 
-func (s *systemProber) probe(r *http.Request) (HealthResponse, int) {
+func (s *systemProber) probe() (HealthResponse, int) {
 	results := make([]ServiceHealth, len(s.names)+1)
 
-	g, gctx := errgroup.WithContext(r.Context())
+	g, gctx := errgroup.WithContext(context.Background())
 	ctx, cancel := context.WithTimeout(gctx, time.Second)
 	defer cancel()
 

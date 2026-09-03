@@ -209,8 +209,14 @@ step "forgot-password for unknown email → 204 (never reveals)" 204 -X POST "$A
   -H 'Content-Type: application/json' -d '{"email":"sylas@mage-underground.org"}'
 step "forgot-password → 204" 204 -X POST "$API/api/v1/auth/forgot-password" \
   -H 'Content-Type: application/json' -d '{"email":"lux@crownguard.house"}'
-sleep 1 # app log flush
-RESET_TOKEN=$(grep -o 'reset-password?token=[A-Za-z0-9_-]*' "$TMP/app.log" | tail -1 | cut -d= -f2)
+# delivery is now async (post-commit) — poll for the log line instead of a
+# single fixed sleep, which flakes when the executor pickup is slow
+RESET_TOKEN=""
+for i in $(seq 1 10); do
+  RESET_TOKEN=$(grep -o 'reset-password?token=[A-Za-z0-9_-]*' "$TMP/app.log" | tail -1 | cut -d= -f2)
+  [ -n "$RESET_TOKEN" ] && break
+  sleep 1
+done
 step "reset-password with e-mailed token → 204" 204 -X POST "$API/api/v1/auth/reset-password" \
   -H 'Content-Type: application/json' -d "{\"token\":\"$RESET_TOKEN\",\"newPassword\":\"LuxReset12345\"}"
 step "old password dead after reset → 401" 401 -X POST "$API/api/v1/auth/login" \

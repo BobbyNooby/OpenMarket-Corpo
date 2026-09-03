@@ -99,6 +99,30 @@ class IntrospectionGrpcServiceTest {
     }
 
     @Test
+    void store_outage_answers_unavailable_per_contract() {
+        // proto contract: infrastructure failure = UNAVAILABLE so consumers
+        // fail closed 503. Uncaught, grpc-java would close with UNKNOWN.
+        when(users.findByIdAndDeletedAtIsNull(userId))
+            .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("db down"));
+
+        var error = new AtomicReference<Throwable>();
+        StreamObserver<IntrospectTokenResponse> observer = new StreamObserver<>() {
+            @Override public void onNext(IntrospectTokenResponse value) {
+                throw new AssertionError("store outage must not answer active");
+            }
+            @Override public void onError(Throwable t) { error.set(t); }
+            @Override public void onCompleted() {}
+        };
+        service.introspectToken(IntrospectTokenRequest.newBuilder()
+            .setAccessToken(token(userId.toString(), Instant.now(), Instant.now().plusSeconds(600)))
+            .build(), observer);
+
+        assertThat(error.get()).isNotNull();
+        assertThat(io.grpc.Status.fromThrowable(error.get()).getCode())
+            .isEqualTo(io.grpc.Status.Code.UNAVAILABLE);
+    }
+
+    @Test
     void valid_live_token_is_active_with_db_roles() {
         when(users.findByIdAndDeletedAtIsNull(userId)).thenReturn(Optional.of(new User()));
         when(bans.findFirstByUserIdAndLiftedAtIsNullOrderByBannedAtDesc(userId))

@@ -85,3 +85,74 @@ func Test_health_system_deployed_down_degrades_but_pending_does_not(t *testing.T
 		t.Fatalf("pending-only outage must NOT degrade the report, got %d", rec2.Code)
 	}
 }
+
+func Test_health_system_probe_survives_client_disconnect(t *testing.T) {
+	var hits int32
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer up.Close()
+
+	p := newSystemProber(&fakeHealth{}, "secret")
+	p.urls = map[string]string{"auth": up.URL}
+	p.names = []string{"auth"}
+	p.deployed = map[string]bool{"auth": true}
+
+	// a client that already hung up must NOT poison the snapshot: probes
+	// are cache refresh on a background context, not request work
+	req := httptest.NewRequest(http.MethodGet, "/health/system", nil)
+	cancelled, cancel := context.WithCancel(req.Context())
+	cancel()
+	p.ServeHTTP(httptest.NewRecorder(), req.WithContext(cancelled))
+
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Fatalf("probe never ran (hits=%d) — request context leaked into the refresh", got)
+	}
+	if p.cached.Status != "healthy" {
+		t.Fatalf("disconnected caller poisoned the snapshot: %v", p.cached.Status)
+	}
+}
+
+func Test_health_system_concurrent_callers_get_stale_not_blocked(t *testing.T) {
+	release := make(chan struct{})
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release // first refresh blocks until the test lets it finish
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer func() { close(release); up.Close() }()
+
+	p := newSystemProber(&fakeHealth{}, "secret")
+	p.urls = map[string]string{"auth": up.URL}
+	p.names = []string{"auth"}
+	p.deployed = map[string]bool{"auth": true}
+	// stale snapshot from a previous round
+	p.cached = HealthResponse{Status: "healthy", Services: []ServiceHealth{{Name: "auth", Status: "healthy"}}}
+	p.code = http.StatusOK
+
+	done := make(chan int, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		p.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health/system", nil))
+		done <- 0 // just must not block indefinitely
+	}()
+
+	// give the first caller time to enter the probe, then answer as a
+	// concurrent second caller — it must be served the stale snapshot
+	time.Sleep(50 * time.Millisecond)
+	second := make(chan int, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		p.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health/system", nil))
+		second <- rec.Code
+	}()
+
+	select {
+	case code := <-second:
+		if code != http.StatusOK {
+			t.Fatalf("concurrent caller must be served the stale snapshot, got %d", code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second caller blocked behind the in-flight probe")
+	}
+}
