@@ -81,4 +81,31 @@ describe("/dev harness page", () => {
     expect(screen.getByPlaceholderText("password")).toHaveValue("");
     expect(screen.getByPlaceholderText("name")).toHaveValue("");
   });
+
+  it("sends a message through the harness with the exact shape", async () => {
+    const user = userEvent.setup();
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "m-1" }), { status: 201 }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+
+    render(<DevPage />);
+    await user.type(screen.getByPlaceholderText("conversationId (uuid)"), "conv-1");
+    await user.type(screen.getByPlaceholderText("message content"), "trade?");
+    await user.click(screen.getByRole("button", { name: "send" }));
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "/api/v1/messaging/conversations/conv-1/messages",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({
+      content: "trade?",
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/201/)).toBeInTheDocument();
+    });
+  });
 });

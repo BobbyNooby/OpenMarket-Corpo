@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { call, devCalls, prettyBody } from "./dev-api";
+import { call, devCalls, messagingCalls, prettyBody } from "./dev-api";
 
 // The harness's request shapes ARE a contract: same-origin relative paths
 // (cookies ride the rewrite), exact bodies, JSON content-type on everything.
@@ -37,6 +37,87 @@ describe("devCalls request shapes", () => {
       name: "logout",
       path: "/api/v1/auth/logout",
       init: { method: "POST" },
+    });
+  });
+});
+
+describe("messagingCalls request shapes", () => {
+  it("targets the same-origin messaging prefix", () => {
+    const specs = messagingCalls(
+      "11111111-1111-1111-1111-111111111111",
+      "",
+      "22222222-2222-2222-2222-222222222222",
+      "hello",
+    );
+    for (const spec of Object.values(specs)) {
+      expect(spec.path.startsWith("/api/v1/messaging")).toBe(true);
+    }
+  });
+
+  it("create posts otherUserId with null listingId when none given", () => {
+    const spec = messagingCalls(
+      "11111111-1111-1111-1111-111111111111",
+      "",
+      "",
+      "",
+    ).createConversation;
+    expect(spec.name).toBe("create conversation");
+    expect(spec.path).toBe("/api/v1/messaging/conversations");
+    expect(spec.init!.method).toBe("POST");
+    expect(JSON.parse(spec.init!.body as string)).toEqual({
+      otherUserId: "11111111-1111-1111-1111-111111111111",
+      listingId: null,
+    });
+  });
+
+  it("create forwards a filled-in listingId as a string", () => {
+    const spec = messagingCalls(
+      "11111111-1111-1111-1111-111111111111",
+      "33333333-3333-3333-3333-333333333333",
+      "",
+      "",
+    ).createConversation;
+    expect(JSON.parse(spec.init!.body as string)).toEqual({
+      otherUserId: "11111111-1111-1111-1111-111111111111",
+      listingId: "33333333-3333-3333-3333-333333333333",
+    });
+  });
+
+  it("send interpolates the conversation id and trims nothing (raw harness)", () => {
+    const spec = messagingCalls(
+      "x",
+      "",
+      "22222222-2222-2222-2222-222222222222",
+      "  yo  ",
+    ).send;
+    expect(spec.path).toBe(
+      "/api/v1/messaging/conversations/22222222-2222-2222-2222-222222222222/messages",
+    );
+    expect(spec.init!.method).toBe("POST");
+    expect(JSON.parse(spec.init!.body as string)).toEqual({ content: "  yo  " });
+  });
+
+  it("read and messages address the conversation; conversations + unread need none", () => {
+    const specs = messagingCalls(
+      "x",
+      "",
+      "22222222-2222-2222-2222-222222222222",
+      "y",
+    );
+    expect(specs.read.path).toBe(
+      "/api/v1/messaging/conversations/22222222-2222-2222-2222-222222222222/read",
+    );
+    expect(specs.read.init!.method).toBe("POST");
+    expect(specs.messages.path).toBe(
+      "/api/v1/messaging/conversations/22222222-2222-2222-2222-222222222222/messages",
+    );
+    expect(specs.conversations).toEqual({
+      name: "conversations",
+      path: "/api/v1/messaging/conversations",
+    });
+    expect(specs.unread).toEqual({
+      name: "unread",
+      path: "/api/v1/messaging/conversations/unread-count",
     });
   });
 });

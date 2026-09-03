@@ -7,7 +7,7 @@ export type Call = { name: string; status: number | null; body: string };
 export type CallSink = (call: Call) => void;
 export type CallSpec = { name: string; path: string; init?: RequestInit };
 
-/** The five harness calls — these ARE the documented request shapes. */
+/** The five auth harness calls — these ARE the documented request shapes. */
 export function devCalls(
   email: string,
   password: string,
@@ -28,6 +28,44 @@ export function devCalls(
     me: { name: "me", path: "/api/v1/users/me" },
     refresh: { name: "refresh", path: "/api/v1/auth/refresh", init: { method: "POST" } },
     logout: { name: "logout", path: "/api/v1/auth/logout", init: { method: "POST" } },
+  };
+}
+
+/**
+ * The messaging harness calls — mirrors contracts/openapi/messaging.v1.yaml.
+ * Raw on purpose: an unparsed conversationId 400s at the gateway (uuid
+ * validation), which IS the instructive result. Content is sent verbatim —
+ * the server trims, so the raw harness can prove it.
+ */
+export function messagingCalls(
+  otherUserId: string,
+  listingId: string,
+  conversationId: string,
+  content: string,
+): Record<string, CallSpec> {
+  const json = (body: unknown) => JSON.stringify(body);
+  const conv = `/api/v1/messaging/conversations/${conversationId}`;
+  return {
+    conversations: { name: "conversations", path: "/api/v1/messaging/conversations" },
+    unread: { name: "unread", path: "/api/v1/messaging/conversations/unread-count" },
+    createConversation: {
+      name: "create conversation",
+      path: "/api/v1/messaging/conversations",
+      init: {
+        method: "POST",
+        body: json({
+          otherUserId,
+          listingId: listingId === "" ? null : listingId,
+        }),
+      },
+    },
+    messages: { name: "messages", path: `${conv}/messages` },
+    send: {
+      name: "send",
+      path: `${conv}/messages`,
+      init: { method: "POST", body: json({ content }) },
+    },
+    read: { name: "mark read", path: `${conv}/read`, init: { method: "POST" } },
   };
 }
 
