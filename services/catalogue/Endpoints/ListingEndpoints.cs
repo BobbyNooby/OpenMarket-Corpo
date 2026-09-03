@@ -120,6 +120,9 @@ public static class ListingEndpoints
                     var sameBody = existing.Amount == body.Amount
                         && existing.RequestedItemId == body.RequestedItemId
                         && existing.RequestedCurrencyId == body.RequestedCurrencyId
+                        && SameExpiry(existing.ExpiresAt, body.ExpiresAt)
+                        && existing.OrderType == (OrderType)System.Enum.Parse(typeof(OrderType), body.OrderType, ignoreCase: true)
+                        && existing.PayingType == (PayingType)System.Enum.Parse(typeof(PayingType), body.PayingType, ignoreCase: true)
                         && SameLines(existing, body.Offered);
                     if (!sameBody)
                         return Envelope.Error(409, "idempotency_key_reused",
@@ -252,10 +255,13 @@ public static class ListingEndpoints
             var idemKey = ctx.Request.Headers["Idempotency-Key"].ToString();
             if (idemKey.Length > 100)
                 return Envelope.Error(400, "validation_failed", "Idempotency-Key too long", "Idempotency-Key");
-            if (idemKey.Length > 0)
+            // deterministic server-side key when the client omits one: a keyless
+            // retry then replays instead of colliding with the empty string on
+            // the (accepter, key) unique index
+            var effectiveKey = idemKey.Length > 0 ? idemKey : $"accept:{accepterId:N}:{id:N}";
             {
                 var existing = await db.Trades.AsNoTracking()
-                    .FirstOrDefaultAsync(t => t.AcceptedById == accepterId && t.IdempotencyKey == idemKey);
+                    .FirstOrDefaultAsync(t => t.AcceptedById == accepterId && t.IdempotencyKey == effectiveKey);
                 if (existing is not null)
                     return Results.Json(new { replay = true, tradeId = existing.Id }, statusCode: 200);
             }
@@ -270,18 +276,29 @@ public static class ListingEndpoints
                 return Envelope.Error(409, "self_accept", "You cannot accept your own listing");
             if (listing.Status == ListingStatus.Expired)
                 return Envelope.Error(410, "listing_expired", "This listing has expired");
+            // lapsed but not yet swept: the status column still says Active —
+            // do not sell a dead listing just because the scanner is a minute away
+            if (listing.ExpiresAt is { } lapse && lapse <= DateTime.UtcNow)
+                return Envelope.Error(410, "listing_expired", "This listing has expired");
 
             await using var tx = await db.Database.BeginTransactionAsync();
             // the atomic gate: exactly one accepter flips active→sold; everyone
-            // else races the rowcount and gets 409/410 below
+            // else races the rowcount and gets 409/410 below. The expiry
+            // predicate closes the check-vs-update race with the sweep.
             var won = await db.Listings
-                .Where(l => l.Id == id && l.Status == ListingStatus.Active)
+                .Where(l => l.Id == id && l.Status == ListingStatus.Active
+                    && (l.ExpiresAt == null || l.ExpiresAt > DateTime.UtcNow))
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(l => l.Status, ListingStatus.Sold)
                     .SetProperty(l => l.UpdatedAt, DateTime.UtcNow));
             if (won == 0)
-                return await db.Entry(listing).ReloadAsync().ContinueWith<IResult>(_ =>
-                    Envelope.Error(409, "listing_sold", "This listing is no longer available"));
+            {
+                await db.Entry(listing).ReloadAsync();
+                return listing.Status == ListingStatus.Expired
+                       || (listing.ExpiresAt is { } lost && lost <= DateTime.UtcNow)
+                    ? Envelope.Error(410, "listing_expired", "This listing has expired")
+                    : Envelope.Error(409, "listing_sold", "This listing is no longer available");
+            }
 
             var (sellerId, buyerId) = listing.OrderType == OrderType.Sell
                 ? (listing.AuthorId, accepterId)
@@ -312,7 +329,7 @@ public static class ListingEndpoints
                 BuyerId = buyerId,
                 Snapshot = snapshot,
                 AcceptedById = accepterId,
-                IdempotencyKey = idemKey,
+                IdempotencyKey = effectiveKey,
             };
             db.Trades.Add(trade);
             db.Outbox.Add(Outbox(id, "listing.sold", new
@@ -532,6 +549,13 @@ public static class ListingEndpoints
                    pair.First.Item1 == pair.Second.Kind && pair.First.Item2 == pair.Second.Id &&
                    pair.First.Item3 == pair.Second.Amount);
     }
+
+    private static bool SameExpiry(DateTime? stored, DateTime? incoming) =>
+        stored is null && incoming is null
+        || stored is { } s && incoming is { } i
+            && Math.Abs((s - i).Ticks) <= TimeSpan.TicksPerMillisecond;
+    // timestamptz rounds to microseconds; a genuine retry re-sends the same
+    // literal, so only sub-millisecond drift may be tolerated
 
     private static bool IsValidStatus(string s) => s.ToLowerInvariant() is
         "active" or "sold" or "paused" or "expired" or "cancelled";

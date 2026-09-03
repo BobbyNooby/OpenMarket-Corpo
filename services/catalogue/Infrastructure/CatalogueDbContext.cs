@@ -111,7 +111,8 @@ public class CatalogueDbContext : DbContext
             e.HasIndex(x => x.SellerId);
             e.HasIndex(x => x.BuyerId);
             e.HasIndex(x => x.CompletedAt);
-            e.HasIndex(x => new { x.AcceptedById, x.IdempotencyKey }).IsUnique();
+            e.HasIndex(x => new { x.AcceptedById, x.IdempotencyKey }).IsUnique()
+                .HasFilter("\"IdempotencyKey\" <> ''"); // keyless accepts synthesize real keys; '' must never collide
             e.HasOne<Listing>().WithMany().HasForeignKey(x => x.ListingId)
                 .OnDelete(DeleteBehavior.Restrict); // v2 delta: trades link to their listing; no cascade
         });

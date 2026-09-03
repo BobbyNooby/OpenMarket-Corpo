@@ -323,7 +323,8 @@ namespace Catalogue.Migrations
                 name: "IX_Trades_AcceptedById_IdempotencyKey",
                 table: "Trades",
                 columns: new[] { "AcceptedById", "IdempotencyKey" },
-                unique: true);
+                unique: true,
+                filter: "\"IdempotencyKey\" <> ''");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Trades_BuyerId",

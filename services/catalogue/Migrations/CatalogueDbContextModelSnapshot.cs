@@ -342,7 +342,8 @@ namespace Catalogue.Migrations
                     b.HasIndex("SellerId");
 
                     b.HasIndex("AcceptedById", "IdempotencyKey")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"IdempotencyKey\" <> ''");
 
                     b.ToTable("Trades", (string)null);
                 });

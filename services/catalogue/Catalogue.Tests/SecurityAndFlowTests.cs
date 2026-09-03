@@ -3,7 +3,9 @@ using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.TestHost;
 using System.Text.Json;
+using Catalogue.Domain;
 using Catalogue.Infrastructure;
+using Microsoft.EntityFrameworkCore;
 using Xunit.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -270,8 +272,24 @@ public class SecurityAndFlowTests(CatalogueFixture fx, ITestOutputHelper output)
         Assert.Contains(HttpStatusCode.Created, codes);
         Assert.Contains(HttpStatusCode.Conflict, codes);
 
-        var third = await buyerA.PostAsync($"/api/v1/catalogue/listings/{listingId}/accept", null);
-        Assert.Equal(HttpStatusCode.Conflict, third.StatusCode);
+        // exactly one trade is the invariant the whole test exists for
+        using (var scope = fx.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<CatalogueDbContext>();
+            Assert.Equal(1, await db.Trades.CountAsync(t => t.ListingId == listingId));
+        }
+
+        // the WINNER retrying the same accept is the exact case idempotency
+        // exists for: double-submit replays the original trade, no second one
+        var winnerIsA = a.Result.StatusCode == HttpStatusCode.Created;
+        var winner = winnerIsA ? buyerA : buyerB;
+        var winnerRetry = await winner.PostAsync($"/api/v1/catalogue/listings/{listingId}/accept", null);
+        Assert.Equal(HttpStatusCode.OK, winnerRetry.StatusCode);
+
+        // a DIFFERENT buyer, though, cannot accept a sold listing
+        var fresh = await NewClient("race-buyer-c", roles: ["user"])
+            .PostAsync($"/api/v1/catalogue/listings/{listingId}/accept", null);
+        Assert.Equal(HttpStatusCode.Conflict, fresh.StatusCode);
     }
 
     [Fact]
@@ -391,6 +409,130 @@ public class SecurityAndFlowTests(CatalogueFixture fx, ITestOutputHelper output)
             offered = new[] { new { kind = "currency", id = coin, amount = 1 } },
         }, "same-key-1");
         Assert.Equal(HttpStatusCode.Conflict, mismatch.StatusCode);
+
+        // same key, same everything EXCEPT the order type — still a different
+        // request and must conflict, not silently replay
+        var wrongKind = await client.PostJsonWithKey("/api/v1/catalogue/listings", new
+        {
+            requestedCurrencyId = coin,
+            amount = 1,
+            orderType = "buy",
+            payingType = "each",
+            offered = new[] { new { kind = "currency", id = coin, amount = 1 } },
+        }, "same-key-1");
+        Assert.Equal(HttpStatusCode.Conflict, wrongKind.StatusCode);
+    }
+
+    [Fact]
+    public async Task keyless_accepts_do_not_collide_on_unique_index()
+    {
+        var coin = await AdminCreateCurrency("Keyless Coin");
+        var listingA = await CreateListing("keyless-seller-a", coin);
+        var listingB = await CreateListing("keyless-seller-b", coin);
+
+        // the same buyer, both accepts WITHOUT an Idempotency-Key — the empty
+        // key must not collide with itself on the (accepter, key) unique index
+        var buyer = NewClient("keyless-buyer", roles: ["user"]);
+        var first = await buyer.PostAsync($"/api/v1/catalogue/listings/{listingA}/accept", null);
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        var second = await buyer.PostAsync($"/api/v1/catalogue/listings/{listingB}/accept", null);
+        Assert.NotEqual(HttpStatusCode.InternalServerError, second.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, second.StatusCode);
+    }
+
+    [Fact]
+    public async Task accept_lapsed_listing_is_410_even_before_sweep()
+    {
+        var coin = await AdminCreateCurrency("Lapse Coin");
+        var client = NewClient("lapse-seller", roles: ["user"]);
+        var created = await client.PostAsJsonAsync("/api/v1/catalogue/listings", new
+        {
+            requestedCurrencyId = coin,
+            amount = 1,
+            orderType = "sell",
+            payingType = "each",
+            expiresAt = DateTime.UtcNow.AddSeconds(2),
+            offered = new[] { new { kind = "currency", id = coin, amount = 1 } },
+        });
+        var listingId = (await created.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("listingId").GetGuid();
+
+        // past its deadline but BEFORE the scanner sweeps: still un-sellable
+        await Task.Delay(2500);
+        var buyer = NewClient("lapse-buyer", roles: ["user"]);
+        var accept = await buyer.PostAsync($"/api/v1/catalogue/listings/{listingId}/accept", null);
+        Assert.Equal(HttpStatusCode.Gone, accept.StatusCode);
+
+        // and no trade may have slipped through in that window
+        var trades = await buyer.GetAsync("/api/v1/catalogue/listings/me/trades");
+        var body = await trades.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Empty(body.GetProperty("trades").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task health_ready_degrades_503_on_outbox_backpressure()
+    {
+        using var scope = fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CatalogueDbContext>();
+        for (var batch = 0; batch < 11; batch++)
+        {
+            db.Outbox.AddRange(Enumerable.Range(0, 1000).Select(_ => new OutboxEvent
+            {
+                AggregateType = "listing",
+                AggregateId = Guid.CreateVersion7(),
+                Topic = "listing.created",
+                Payload = "{}",
+            }));
+            await db.SaveChangesAsync();
+        }
+
+        var res = await Anonymous().GetAsync("/health/ready");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task patch_can_switch_requested_kind()
+    {
+        var coin = await AdminCreateCurrency("Switch Coin");
+        await AdminCreateItem("Switch Item");
+        var client = NewClient("switch-user", roles: ["user"]);
+        var listingId = await CreateListing("switch-user", coin);
+
+        // full-replace: the PATCH states the whole desired listing, so dropping
+        // requestedItemId and naming a currency instead is an ordinary update
+        var patch = await client.PatchAsJsonAsync($"/api/v1/catalogue/listings/{listingId}", new
+        {
+            amount = 2,
+            requestedCurrencyId = coin,
+            offered = new[] { new { kind = "currency", id = coin, amount = 1 } },
+        });
+        output.WriteLine($"PATCH -> {(int)patch.StatusCode}: {await patch.Content.ReadAsStringAsync()}");
+        Assert.Equal(HttpStatusCode.OK, patch.StatusCode);
+
+        var get = await Anonymous().GetAsync($"/api/v1/catalogue/listings/{listingId}");
+        var body = await get.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("currency", body.GetProperty("requested").GetProperty("kind").GetString());
+    }
+
+    [Fact]
+    public async Task banned_user_watchlist_delete_fails_closed_403()
+    {
+        var coin = await AdminCreateCurrency("Watch Ban Coin");
+        var listingId = await CreateListing("watch-ban-seller", coin);
+        var watcher = NewClient("watch-ban-user", roles: ["user"]);
+        var put = await watcher.PutAsJsonAsync($"/api/v1/catalogue/me/watchlist/{listingId}", new { });
+        Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+
+        fx.Introspector.Override = t => (false, GuidUtility.FromName(t), Array.Empty<string>());
+        try
+        {
+            var del = await watcher.DeleteAsync($"/api/v1/catalogue/me/watchlist/{listingId}");
+            Assert.Equal(HttpStatusCode.Forbidden, del.StatusCode);
+        }
+        finally
+        {
+            fx.Introspector.Override = null;
+        }
     }
 }
 
