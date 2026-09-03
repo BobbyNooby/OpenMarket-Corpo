@@ -18,20 +18,11 @@ public static class MeEndpoints
         var g = app.MapGroup("/api/v1/catalogue/me").WithTags("me");
         CatalogueDbContext Db(HttpContext ctx) => ctx.RequestServices.GetRequiredService<CatalogueDbContext>();
 
-        // ── my listings summary ─────────────────────────────────
-        g.MapGet("/listings", async (HttpContext ctx) =>
-        {
-            var sub = Edge.Sub(ctx);
-            var db = Db(ctx);
-            var listings = await db.Listings.AsNoTracking()
-                .Where(l => l.AuthorId == sub)
-                .OrderByDescending(l => l.CreatedAt)
-                .Select(l => new { l.Id, l.Status, l.OrderType, l.Amount, l.CreatedAt, l.ExpiresAt })
-                .ToListAsync();
-            return Results.Json(new { listings });
-        });
-
         // ── watchlist ───────────────────────────────────────────
+        // NOTE: "my listings" intentionally lives only in ListingEndpoints
+        // (/listings/me/listings — with the ban check); the former /me/listings
+        // copy here was the same query without the ban check, removed as dup
+
         g.MapGet("/watchlist", async (HttpContext ctx) =>
         {
             var sub = Edge.Sub(ctx);
@@ -77,8 +68,12 @@ public static class MeEndpoints
             return Results.Ok(new { listingId, watching = true });
         });
 
-        g.MapDelete("/watchlist/{listingId:guid}", async (HttpContext ctx, Guid listingId) =>
+        g.MapDelete("/watchlist/{listingId:guid}", async (HttpContext ctx, Guid listingId,
+            IIntrospector introspector) =>
         {
+            // same ban gate as every other mutation — banned users get no
+            // write path, not even "unwatch" (policy parity, Edge.cs)
+            if (await Edge.RequireLiveAsync(ctx, introspector, logger) is { } fail) return fail;
             var sub = Edge.Sub(ctx);
             var removed = await Db(ctx).Watchlist
                 .Where(w => w.UserId == sub && w.ListingId == listingId)

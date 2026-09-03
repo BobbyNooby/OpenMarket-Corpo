@@ -1,4 +1,5 @@
 using Xunit;
+using System.Collections.Concurrent;
 using System.Net;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -37,6 +38,9 @@ public class CatalogueFixture : IAsyncLifetime
 
     public FakeIntrospector Introspector { get; } = new();
 
+    /// <summary>App-side log lines (error+) — read this when a request 500s.</summary>
+    public ConcurrentQueue<string> CapturedErrors { get; } = new();
+
     public RsaSecurityKey SigningKey { get; private set; } = null!;
     private RsaSecurityKey PrivateKey { get; set; } = null!;
 
@@ -52,7 +56,13 @@ public class CatalogueFixture : IAsyncLifetime
 
         Factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
-            b.ConfigureLogging(l => l.AddSimpleConsole().SetMinimumLevel(LogLevel.Error));
+            // surface the app's own error logs (the exception handler logs
+            // every 500 with full stack) in the test host's console output
+            b.ConfigureLogging(l => l
+                .AddSimpleConsole(o => o.SingleLine = true)
+                .AddFilter("Microsoft.AspNetCore", LogLevel.Warning)
+                .SetMinimumLevel(LogLevel.Information)
+                .AddProvider(new CaptureLoggerProvider(CapturedErrors)));
             // real libpq-shaped URL — exercises the same parser production uses
             b.UseSetting("DATABASE_URL",
                 $"postgres://catalogue:catalogue-test@{Postgres.Hostname}:{Postgres.GetMappedPublicPort(5432)}/catalogue_db");
@@ -99,8 +109,6 @@ public class CatalogueFixture : IAsyncLifetime
 /// </summary>
 public class FakeIntrospector : IIntrospector
 {
-    private (bool active, Guid user, string[] roles)? configured;
-
     public Func<string, (bool active, Guid user, string[] roles)?>? Override { get; set; }
     public int CallCount;
     private readonly Dictionary<string, (bool active, Guid user, string[] roles)> registered = new();
@@ -149,7 +157,6 @@ public class FakeIntrospector : IIntrospector
                 : Task.FromResult<IntrospectionResult?>(ToResult(o.Value));
         }
         if (registered.TryGetValue(accessToken, out var reg)) return Task.FromResult<IntrospectionResult?>(ToResult(reg));
-        if (configured is { } c) return Task.FromResult<IntrospectionResult?>(ToResult(c));
         var user = GuidUtility.FromName(accessToken);
         return Task.FromResult<IntrospectionResult?>(new IntrospectionResult(true, user, ["user"]));
     }
@@ -164,5 +171,32 @@ public static class GuidUtility
     {
         var bytes = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(name));
         return new Guid(bytes[..16]);
+    }
+}
+
+/// <summary>
+/// Keeps app-side log lines in memory so a test can print WHY a request 500'd
+/// — the app's console output is lost across test-host threads.
+/// </summary>
+public class CaptureLoggerProvider(ConcurrentQueue<string> sink) : ILoggerProvider
+{
+    public ILogger CreateLogger(string categoryName) => new CaptureLogger(sink, categoryName);
+    public void Dispose() { }
+
+    private class CaptureLogger(ConcurrentQueue<string> sink, string category) : ILogger
+    {
+        private static readonly bool SqlTrace = Environment.GetEnvironmentVariable("CAPTURE_SQL") == "1";
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) =>
+            logLevel >= LogLevel.Error
+            || (SqlTrace && logLevel == LogLevel.Information
+                && category.StartsWith("Microsoft.EntityFrameworkCore.Database.Command"));
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (!IsEnabled(logLevel)) return;
+            sink.Enqueue($"[{category}] {formatter(state, exception)}\n{exception}");
+        }
     }
 }

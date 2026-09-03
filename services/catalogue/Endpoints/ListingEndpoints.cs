@@ -14,8 +14,12 @@ public static class ListingEndpoints
     public record CreateListingRequest(Guid? RequestedItemId, Guid? RequestedCurrencyId, int Amount,
         string OrderType, string PayingType, DateTime? ExpiresAt, List<OfferedLine> Offered);
 
-    public record PatchListingRequest(int? Amount, DateTime? ExpiresAt,
-        Guid? RequestedItemId, Guid? RequestedCurrencyId, List<OfferedLine>? Offered);
+    // full-replace contract (v1's PUT semantics, kept on PATCH for route
+    // stability): the body states the ENTIRE desired listing — absent fields
+    // mean "cleared", so switching the requested item↔currency kind is an
+    // ordinary update rather than an XOR-violating merge
+    public record PatchListingRequest(int Amount, DateTime? ExpiresAt,
+        Guid? RequestedItemId, Guid? RequestedCurrencyId, List<OfferedLine> Offered);
 
     private const int MaxOfferLines = 20;
 
@@ -144,7 +148,7 @@ public static class ListingEndpoints
                 ExpiresAt = body.ExpiresAt,
                 IdempotencyKey = idemKey,
             };
-            foreach (var line in body.Offered) AddOfferedLine(listing, line);
+            foreach (var line in body.Offered) AddOfferedLine(db, listing, line);
             db.Listings.Add(listing);
             db.Outbox.Add(Outbox(listing.Id, "listing.created", new
             {
@@ -175,26 +179,18 @@ public static class ListingEndpoints
             if (listing.Status is not (ListingStatus.Active or ListingStatus.Paused))
                 return Envelope.Error(409, "listing_not_editable", $"A {listing.Status.ToString().ToLowerInvariant()} listing cannot be edited");
 
-            var amount = body.Amount ?? listing.Amount;
-            var expiresAt = body.ExpiresAt ?? listing.ExpiresAt;
-            var requestedItem = body.RequestedItemId ?? listing.RequestedItemId;
-            var requestedCurrency = body.RequestedCurrencyId ?? listing.RequestedCurrencyId;
-            if (await ValidateAsync(db, amount, listing.OrderType.ToString(), listing.PayingType.ToString(),
-                    expiresAt, body.Offered, requestedItem, requestedCurrency,
-                    keepExistingLines: body.Offered is null, currentLines: listing) is { } verr) return verr;
+            if (await ValidateAsync(db, body.Amount, listing.OrderType.ToString(), listing.PayingType.ToString(),
+                    body.ExpiresAt, body.Offered, body.RequestedItemId, body.RequestedCurrencyId) is { } verr) return verr;
 
-            listing.Amount = amount;
-            listing.ExpiresAt = expiresAt;
-            listing.RequestedItemId = requestedItem;
-            listing.RequestedCurrencyId = requestedCurrency;
-            if (body.Offered is not null)
-            {
-                db.OfferedItems.RemoveRange(listing.OfferedItems);
-                db.OfferedCurrencies.RemoveRange(listing.OfferedCurrencies);
-                listing.OfferedItems = new List<ListingOfferedItem>();
-                listing.OfferedCurrencies = new List<ListingOfferedCurrency>();
-                foreach (var line in body.Offered) AddOfferedLine(listing, line);
-            }
+            listing.Amount = body.Amount;
+            listing.ExpiresAt = body.ExpiresAt;
+            listing.RequestedItemId = body.RequestedItemId;
+            listing.RequestedCurrencyId = body.RequestedCurrencyId;
+            db.OfferedItems.RemoveRange(listing.OfferedItems);
+            db.OfferedCurrencies.RemoveRange(listing.OfferedCurrencies);
+            listing.OfferedItems = new List<ListingOfferedItem>();
+            listing.OfferedCurrencies = new List<ListingOfferedCurrency>();
+            foreach (var line in body.Offered) AddOfferedLine(db, listing, line);
             listing.UpdatedAt = DateTime.UtcNow;
             db.Outbox.Add(Outbox(listing.Id, "listing.updated", new { listingId = listing.Id, authorId = sub }));
             await db.SaveChangesAsync();
@@ -319,7 +315,7 @@ public static class ListingEndpoints
                 buyerId,
                 acceptedById = accepterId,
                 completedAt = DateTime.UtcNow,
-            });
+            }, OutboxJson); // camelCase, matching the outbox + API surface
 
             var trade = new Trade
             {
@@ -415,13 +411,16 @@ public static class ListingEndpoints
     }
 
     private static async Task<IResult?> ValidateAsync(CatalogueDbContext db, int amount, string orderType,
-        string payingType, DateTime? expiresAt, List<OfferedLine>? offered,
-        Guid? requestedItemId, Guid? requestedCurrencyId,
-        bool keepExistingLines = false, Listing? currentLines = null)
+        string payingType, DateTime? expiresAt, List<OfferedLine> offered,
+        Guid? requestedItemId, Guid? requestedCurrencyId)
     {
-        if (orderType is not ("buy" or "sell"))
+        // case-insensitive: PATCH handlers pass enum.ToString() ("Sell"),
+        // JSON bodies carry the lowercase wire form — both must validate
+        var order = orderType.ToLowerInvariant();
+        var paying = payingType.ToLowerInvariant();
+        if (order is not ("buy" or "sell"))
             return Envelope.Error(400, "validation_failed", "orderType must be buy or sell", "orderType");
-        if (payingType is not ("each" or "total"))
+        if (paying is not ("each" or "total"))
             return Envelope.Error(400, "validation_failed", "payingType must be each or total", "payingType");
         if (amount < 1 || amount > 1_000_000_000)
             return Envelope.Error(400, "validation_failed", "amount must be between 1 and 1,000,000,000", "amount");
@@ -438,11 +437,7 @@ public static class ListingEndpoints
                 return Envelope.Error(400, "validation_failed", "expiresAt may be at most 30 days out", "expiresAt");
         }
 
-        var lines = offered ?? (keepExistingLines && currentLines is not null
-            ? currentLines.OfferedItems.Select(o => new OfferedLine("item", o.ItemId, o.Amount))
-                .Concat(currentLines.OfferedCurrencies.Select(o => new OfferedLine("currency", o.CurrencyId, o.Amount)))
-                .ToList()
-            : new List<OfferedLine>());
+        var lines = offered;
         if (lines.Count == 0)
             return Envelope.Error(400, "validation_failed", "At least one offered line is required", "offered");
         if (lines.Count > MaxOfferLines)
@@ -480,12 +475,25 @@ public static class ListingEndpoints
         static int num_non_nulls(Guid? a, Guid? b) => (a is not null ? 1 : 0) + (b is not null ? 1 : 0);
     }
 
-    private static void AddOfferedLine(Listing listing, OfferedLine line)
+    private static void AddOfferedLine(CatalogueDbContext db, Listing listing, OfferedLine line)
     {
+        // explicit DbSet.Add, never navigation-add: these entities carry
+        // client/generated v7 keys, and graph discovery from a *tracked
+        // modified* parent would mark them Unchanged→UPDATE (0 rows, 500).
+        // DbSet.Add states Added unconditionally; create's fresh-parent path
+        // stays correct too.
         if (line.Kind == "item")
-            listing.OfferedItems.Add(new ListingOfferedItem { ItemId = line.Id, Amount = line.Amount });
+        {
+            var e = new ListingOfferedItem { ItemId = line.Id, Amount = line.Amount };
+            db.OfferedItems.Add(e);
+            listing.OfferedItems.Add(e);
+        }
         else
-            listing.OfferedCurrencies.Add(new ListingOfferedCurrency { CurrencyId = line.Id, Amount = line.Amount });
+        {
+            var e = new ListingOfferedCurrency { CurrencyId = line.Id, Amount = line.Amount };
+            db.OfferedCurrencies.Add(e);
+            listing.OfferedCurrencies.Add(e);
+        }
     }
 
     private static readonly JsonSerializerOptions OutboxJson = new(JsonSerializerDefaults.Web);

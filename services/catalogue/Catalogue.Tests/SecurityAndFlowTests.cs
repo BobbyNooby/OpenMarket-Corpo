@@ -507,6 +507,7 @@ public class SecurityAndFlowTests(CatalogueFixture fx, ITestOutputHelper output)
             offered = new[] { new { kind = "currency", id = coin, amount = 1 } },
         });
         output.WriteLine($"PATCH -> {(int)patch.StatusCode}: {await patch.Content.ReadAsStringAsync()}");
+        foreach (var err in fx.CapturedErrors) output.WriteLine($"APP-LOG: {err}");
         Assert.Equal(HttpStatusCode.OK, patch.StatusCode);
 
         var get = await Anonymous().GetAsync($"/api/v1/catalogue/listings/{listingId}");
