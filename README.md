@@ -193,7 +193,8 @@ full OWASP-grounded security audit with every finding remediated
   calls go internal gRPC from the start (no REST-proxy stage); catalogue stays
   REST until its slice migrates *(auth shipped & audited; **gateway live** —
   REST proxying + gRPC edge auth, see [gateway README](services/gateway/README.md);
-  catalogue next)*
+  **catalogue live** — domain, listings/trades with idempotent FCFS accept,
+  wired through the gateway; audit-hardened, 30 green tests)*
 - **Phase 2** — Messaging (Go) + Presence/Notifications (Python) over WS — full
   chat flow traced
 - **Phase 3** — Fill the domain: reputation, assets/images, admin/moderation,

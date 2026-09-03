@@ -91,6 +91,10 @@ make auth           # Spring Boot
 make admin          # Spring Boot
 make catalogue      # C# ASP.NET
 make gateway        # Go
+make messaging      # Go
+make presence       # Python FastAPI
+make assets         # Python FastAPI
+make frontend       # Next.js (frontend/)
 ```
 
 ### Frontend dev harness
@@ -101,10 +105,6 @@ chain: rewrite → gateway → gRPC edge introspection → auth → Postgres.
 `/api/*` is proxied to the gateway via a Next.js rewrite, so session
 cookies stay same-origin — no CORS config exists anywhere. Chrome/Firefox
 only: Safari refuses Secure cookies on `http://localhost`.
-make messaging      # Go
-make presence       # Python FastAPI
-make assets         # Python FastAPI
-make frontend       # Next.js (frontend/)
 
 # Docker (all services)
 make build          # Build all Docker images

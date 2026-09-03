@@ -13,7 +13,8 @@ chosen so `make gateway` works against `make auth` with zero configuration.
 | `AUTH_URL` | no | `http://localhost:8080` | Auth REST base — the proxy target for `/api/v1/auth`, `/api/v1/users`, `/api/v1/admin`, and jwks |
 | `AUTH_GRPC_URL` | no | `localhost:9090` | Auth gRPC (`IntrospectToken`) — the edge-auth channel |
 | `GRPC_INTERNAL_SECRET` | no | `dev-internal-secret` | Shared secret for the gRPC hop; **must match** auth's value. Mismatch = every protected route 503s |
-| `CATALOGUE_URL` … `ADMIN_URL` | no | `localhost:8081`–`8085` | Pending services — used only by `/health/system` |
+| `CATALOGUE_URL` | no | `http://localhost:8081` | Catalogue REST base — the live proxy target for `/api/v1/catalogue` |
+| `MESSAGING_URL` … `ADMIN_URL` | no | `localhost:8082`–`8085` | Pending services — used only by `/health/system` |
 
 The missing-var failure mode is always "wrong target", never a crash: a bad
 `AUTH_URL` surfaces as 502s on auth routes; a bad `AUTH_GRPC_URL` surfaces

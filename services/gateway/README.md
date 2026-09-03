@@ -17,13 +17,15 @@ ever talks to this service.
 |---|---|---|
 | `/api/v1/auth/*`, `/api/v1/users/*`, `/api/v1/admin/*` | auth (`:8080`) | middleware |
 | `/.well-known/jwks.json` | auth | public |
-| `/api/v1/catalogue/*` … `/assets/*` | *stub* | 501 `not_deployed` |
+| `/api/v1/catalogue/*` | catalogue (`:8081`) | none — catalogue enforces its own authn + ban checks |
+| `/api/v1/messaging/*` … `/assets/*` | *stub* | 501 `not_deployed` |
 | unknown `/api/*` | — | 404 `not_found` |
 | `/health/*` | gateway itself | public |
 
-The five stubbed prefixes answer a stable `501 not_deployed` envelope so the
-frontend can distinguish "route exists, service pending" from "unknown route".
-Filling a stub in = one `Mount()` call in `main.go`.
+The three remaining stubbed prefixes answer a stable `501 not_deployed`
+envelope so the frontend can distinguish "route exists, service pending" from
+"unknown route". Filling a stub in = one `Mount()` call in `main.go`
+(catalogue did exactly that).
 
 ## Edge authentication (the first protobuf)
 

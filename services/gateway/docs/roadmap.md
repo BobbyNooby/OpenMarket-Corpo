@@ -5,7 +5,11 @@
 ## Shipped
 
 - [x] **Skeleton + per-service mounts** — auth live (3 route families +
-  jwks), five stubs answering `501 not_deployed`, unknown `/api/*` → 404
+  jwks), stubs answering `501 not_deployed` for the pending services
+  (messaging/presence/assets — catalogue has since been mounted live),
+  unknown `/api/*` → 404
+- [x] **Catalogue upstream** — second live mount (plain REST proxy; catalogue
+  enforces its own authn + ban checks upstream)
 - [x] **Edge authentication** — `IntrospectToken` over gRPC, fail-closed,
   verdict cache (10s TTL / 10k cap), internal-secret guard
 - [x] **Edge sanitization** — XFF overwrite (stdlib + explicit), identity

@@ -9,7 +9,7 @@ reviewed before either side implements against it.
 
 ```
 contracts/
-├── generate.sh                    # regenerates committed Go stubs (needs protoc + plugins)
+├── generate.sh                    # regenerates committed Go + C# stubs (needs protoc + plugins)
 ├── proto/
 │   └── openmarket/
 │       └── auth/v1/auth.proto     # AuthService: IntrospectToken (live), GetUser (reserved)
@@ -21,6 +21,7 @@ contracts/
 | Consumer | Mechanism | Needs local tooling? |
 |---|---|---|
 | Gateway (Go) | `./generate.sh` → stubs into `services/gateway/internal/authpb` — **committed**, so CI never runs protoc | yes, once: protoc + protoc-gen-go + protoc-gen-go-grpc |
+| Catalogue (C#) | `./generate.sh` → stubs into `services/catalogue/AuthGrpc` (via the `csharp_namespace` option) — **committed**, same rationale | yes, once: protoc + Grpc.Tools plugins |
 | Auth (Java) | `protobuf-maven-plugin` reads `contracts/proto` during `mvn compile` — generated into `target/`, never committed | no (plugin downloads protoc) |
 
 Change flow: edit the `.proto` → run `./generate.sh` → commit the schema

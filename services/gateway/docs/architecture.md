@@ -12,7 +12,8 @@ its job is transport, trust, and traffic shaping.
 ```
 browser ──REST/WS──▶ gateway ──gRPC──▶ auth (edge check)
                         └──REST proxy─▶ auth (the actual call)
-                        └──(501 stubs)─▶ catalogue / messaging / presence / assets / admin
+                        └──REST proxy─▶ catalogue (upstream-owned authn)
+                        └──(501 stubs)─▶ messaging / presence / assets
 ```
 
 ## Trust model
@@ -50,6 +51,8 @@ main.go                      composition root: env → dial gRPC → mount → s
 internal/proxy/              shared ReverseProxy factory (the edge guarantees)
 internal/middleware/         edge authentication + verdict cache
 internal/upstream/auth/      Mount(): auth's three route families + jwks
+internal/upstream/catalogue/ Mount(): catalogue proxy (no edge middleware —
+                             catalogue does its own JWT + ban checks)
 internal/upstream/stub/      NotDeployed(service): the 501 placeholder
 internal/authclient/         gRPC channel: dial, health poll, secret credential
 internal/authpb/             generated stubs (committed — CI needs no protoc)

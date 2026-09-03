@@ -8,7 +8,7 @@
 |---|---|---|---|
 | `/api/v1/auth/`, `/api/v1/users/`, `/api/v1/admin/` (+ bare `/api/v1/auth`) | auth `:8080` | yes | — |
 | `/.well-known/jwks.json` | auth | public | — |
-| `/api/v1/catalogue/` | stub | — | `501 not_deployed` |
+| `/api/v1/catalogue/` | catalogue `:8081` | none — upstream enforces | catalogue's own 401/403/503 envelopes |
 | `/api/v1/messaging/` | stub | — | `501 not_deployed` |
 | `/api/v1/presence/` | stub | — | `501 not_deployed` |
 | `/api/v1/assets/` | stub | — | `501 not_deployed` |
@@ -34,9 +34,9 @@ The pattern is one `Mount()` per upstream, registered in `main.go`:
 4. Add the service's URL env var to the composition root and
    `/health/system`.
 
-Catalogue is the first candidate: its API is REST today, so `Mount` is a
+Catalogue was the first candidate: its API is REST, so `Mount` is a
 near-copy of auth's minus the middleware, plus CORS-free same-origin
-proxying for free.
+proxying for free — it is mounted live today.
 
 ## ServeMux pitfalls (why the code looks the way it does)
 

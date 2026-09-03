@@ -178,9 +178,10 @@ func healthSystem(authHealth healthpb.HealthClient, secret string, w http.Respon
 				sh.Status = "degraded"
 			}
 		}
-		if sh.Status != "healthy" && name != "auth" {
-			// Auth is the only deployed service; pending ones are expected
-			// to be unreachable and must not degrade the overall report.
+		// Deployed services must be healthy for the overall report; pending
+		// ones are expected to be unreachable and must not degrade it.
+		deployed := map[string]bool{"auth": true, "catalogue": true}
+		if sh.Status != "healthy" && deployed[name] {
 			allHealthy = false
 		}
 		results = append(results, sh)
