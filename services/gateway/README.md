@@ -18,14 +18,15 @@ ever talks to this service.
 | `/api/v1/auth/*`, `/api/v1/users/*`, `/api/v1/admin/*` | auth (`:8080`) | middleware |
 | `/.well-known/jwks.json` | auth | public |
 | `/api/v1/catalogue/*` | catalogue (`:8081`) | none — catalogue enforces its own authn + ban checks |
-| `/api/v1/messaging/*` … `/assets/*` | *stub* | 501 `not_deployed` |
+| `/api/v1/messaging/*` + `/ws` | messaging (`:8082`) | middleware — ban blocklist + introspection before the hop |
+| `/api/v1/presence/`, `/api/v1/assets/` | *stub* | 501 `not_deployed` |
 | unknown `/api/*` | — | 404 `not_found` |
 | `/health/*` | gateway itself | public |
 
-The three remaining stubbed prefixes answer a stable `501 not_deployed`
+The two remaining stubbed prefixes answer a stable `501 not_deployed`
 envelope so the frontend can distinguish "route exists, service pending" from
 "unknown route". Filling a stub in = one `Mount()` call in `main.go`
-(catalogue did exactly that).
+(catalogue and messaging did exactly that).
 
 ## Edge authentication (the first protobuf)
 
@@ -35,9 +36,12 @@ cookie falls back — mirroring auth's own resolver). The middleware:
 1. **public path** → pass through untouched (exact-match list mirroring
    auth's permitAll — no prefix leakage into subpaths)
 2. **no token** → forward anyway; the upstream owns the 401 shape
-3. **token + `active=false`** → 401 at the edge (`invalid, expired, banned,
+3. **blocklisted sub** (`user.banned` → Kafka → Redis) → 401 *before*
+   introspection; a Redis outage fails open into step 4 — the blocklist
+   is an optimization, never the authority (`internal/blocklist`)
+4. **token + `active=false`** → 401 at the edge (`invalid, expired, banned,
    deleted`)
-4. **introspection unavailable** → 503, fail-closed; never degrade into
+5. **introspection unavailable** → 503, fail-closed; never degrade into
    "allow"
 
 `IntrospectToken` is intentionally more than a signature check: auth answers
