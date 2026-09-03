@@ -8,8 +8,14 @@ audit log, site configuration, and admin-facing analytics.
 
 ## Current state
 
-- Basic Spring Boot skeleton: `/`, `/health/live`, `/health/ready`.
-- Dockerfile + compose wiring, same shape as the auth service.
+- Basic Spring Boot skeleton: `/`, `/health/live` (dependency-free),
+  `/health/ready` (SELECT 1 against Postgres, fixed-string error on
+  failure — no exception leakage).
+- Flyway baseline migration (`V1__baseline.sql`: reports, audit_log,
+  site_config, analytics_events) so first boot has schema history;
+  `ddl-auto: validate` meets it once Phase 3 entities land.
+- Spring Boot 4.1.1 (migrated off the 3.3.4 EOL line to match auth),
+  non-root container image, EXPOSE 8085.
 
 ## Planned responsibilities
 

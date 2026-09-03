@@ -20,7 +20,9 @@ management:
       exposure: health
   endpoint:
     health:
-      show-details: always
+      # never: the actuator payload can name DB hosts/users — the app's own
+      # /health/ready answers a fixed-string error instead.
+      show-details: never
 
 server:
   port: 8085
