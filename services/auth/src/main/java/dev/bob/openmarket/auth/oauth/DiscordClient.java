@@ -44,7 +44,7 @@ public class DiscordClient {
     }
 
     public String buildAuthorizeUrl(String state) {
-        return UriComponentsBuilder.fromHttpUrl(props.getAuthorizeUrl())
+        return UriComponentsBuilder.fromUriString(props.getAuthorizeUrl())
             .queryParam("response_type", "code")
             .queryParam("client_id", props.getClientId())
             .queryParam("redirect_uri", props.getRedirectUri())

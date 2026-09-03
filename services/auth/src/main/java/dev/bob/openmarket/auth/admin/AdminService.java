@@ -18,7 +18,7 @@ import dev.bob.openmarket.auth.repository.UserRoleRepository;
 import dev.bob.openmarket.auth.repository.WarningRepository;
 import dev.bob.openmarket.auth.token.RefreshTokenService;
 import dev.bob.openmarket.auth.user.UsernameDeriver;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;

@@ -1,7 +1,7 @@
 package dev.bob.openmarket.auth.user;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 import dev.bob.openmarket.auth.common.ConflictException;
 import dev.bob.openmarket.auth.common.NotFoundException;
 import dev.bob.openmarket.auth.domain.OutboxEvent;

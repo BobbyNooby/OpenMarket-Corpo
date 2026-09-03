@@ -1,6 +1,6 @@
 package dev.bob.openmarket.auth.admin;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import dev.bob.openmarket.auth.domain.AuditLog;
 import dev.bob.openmarket.auth.repository.AuditLogRepository;
 import org.springframework.stereotype.Service;

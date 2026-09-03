@@ -164,6 +164,8 @@ shared database (that's why everything is schema-qualified, not db-qualified).
 | `jwt.key-path` | env `JWT_KEY_PATH` | Signing key location |
 | `auth.cookie-secure` | env `AUTH_COOKIE_SECURE` | Cookie `Secure` flag |
 | `auth.trusted-proxy-ip` | env `AUTH_TRUSTED_PROXY_IP` | Proxies allowed to set `X-Forwarded-For` (see above) |
+| `auth.docs-public` | env `AUTH_DOCS_PUBLIC` | Interactive docs (`/docs`, swagger-ui, api-docs) — **deny by default**; dev environments opt in |
+| `management.endpoint.health.show-details` | env `HEALTH_SHOW_DETAILS` | `never` by default — actuator health details are an internal diagnostic |
 | `auth.discord.connect-timeout-ms` | env `DISCORD_CONNECT_TIMEOUT_MS` | Discord HTTP connect timeout |
 | `auth.discord.read-timeout-ms` | env `DISCORD_READ_TIMEOUT_MS` | Discord HTTP read timeout |
 | `auth.mail.log-full` | `false` | Dev-mode mail logging detail. `false` (default): recipient + subject only — a prod misconfiguration can't leak reset links into log aggregation. `true`: full bodies too (the flow test sets it). See `mail/EmailDispatcher` |

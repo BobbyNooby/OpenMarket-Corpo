@@ -6,7 +6,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.3.4</version>
+        <version>4.1.1</version>
     </parent>
     <groupId>dev.bob</groupId>
     <artifactId>auth</artifactId>
@@ -15,10 +15,6 @@
     <description>OpenMarket v2 — Auth &amp; Users (Java Spring Boot)</description>
     <properties>
         <java.version>21</java.version>
-        <!-- Boot 3.3.4 pins Mockito 5.11 / Byte Buddy 1.14, which can't
-             instrument on JDK 26+ runtimes. Override until Boot is upgraded. -->
-        <mockito.version>5.23.0</mockito.version>
-        <byte-buddy.version>1.18.12</byte-buddy.version>
         <!-- gRPC internal API surface (gateway introspection). Pinned so the
              protoc codegen, generated stubs and runtime never drift apart. -->
         <grpc.version>1.64.0</grpc.version>
@@ -71,10 +67,16 @@
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-database-postgresql</artifactId>
         </dependency>
+        <!-- Boot 4 split the integrations out of autoconfigure: plain
+             flyway-core no longer activates migration-on-startup -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-flyway</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-            <version>2.6.0</version>
+            <version>3.1.0</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.security</groupId>
@@ -122,6 +124,12 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <!-- Boot 4 moved the @WebMvcTest slice into this module -->
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-webmvc-test</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

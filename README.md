@@ -180,8 +180,8 @@ full OWASP-grounded security audit with every finding remediated
 
 | Level | What | Where |
 |-------|------|-------|
-| Unit + contract | 201 tests pinning behavior, envelopes, and security edges | `mvn test` (CI on every push) |
-| End-to-end | 126-step flow test against real Postgres + fake Discord: register → verify → OAuth → ban → roles → erase → delete — §14 runs the last steps **through the gateway** | `services/auth/scripts/flow-test.sh` |
+| Unit + contract | 208 tests pinning behavior, envelopes, and security edges | `mvn test` (CI on every push) |
+| End-to-end | 140-step flow test against real Postgres + fake Discord + real catalogue: register → verify → OAuth → ban → erase → listings/trades through the gateway — §14–15 run the last steps **through the gateway** | `services/auth/scripts/flow-test.sh` |
 | Container | Non-root image, persisted signing key, writable key volume | `deploy/compose` |
 | Supply chain | Weekly OWASP dependency-check (CVSS 9 gate) | CI, advisory |
 | Hygiene | `make test` / `make lint` run all four languages from one command | root `Makefile` |

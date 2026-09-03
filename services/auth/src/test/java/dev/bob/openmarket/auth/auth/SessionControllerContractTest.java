@@ -8,8 +8,8 @@ import dev.bob.openmarket.auth.token.TokenCookieService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -37,7 +37,7 @@ class SessionControllerContractTest {
 
     @Autowired MockMvc mvc;
 
-    @MockBean RefreshTokenService refreshTokens;
+    @MockitoBean RefreshTokenService refreshTokens;
 
     private static final UUID FAMILY = UUID.fromString("33333333-3333-3333-3333-333333333333");
 

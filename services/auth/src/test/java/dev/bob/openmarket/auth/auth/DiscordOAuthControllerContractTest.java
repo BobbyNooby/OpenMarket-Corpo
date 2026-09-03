@@ -14,8 +14,8 @@ import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -42,10 +42,10 @@ class DiscordOAuthControllerContractTest {
 
     @Autowired MockMvc mvc;
 
-    @MockBean AuthService authService;
-    @MockBean DiscordClient discord;
-    @MockBean OAuthStateService states;
-    @MockBean ClientIpResolver clientIpResolver;
+    @MockitoBean AuthService authService;
+    @MockitoBean DiscordClient discord;
+    @MockitoBean OAuthStateService states;
+    @MockitoBean ClientIpResolver clientIpResolver;
 
     private static final String AUTH = "Authorization";
 

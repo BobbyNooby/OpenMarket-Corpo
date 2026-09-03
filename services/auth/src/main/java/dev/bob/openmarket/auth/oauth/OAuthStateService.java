@@ -1,6 +1,6 @@
 package dev.bob.openmarket.auth.oauth;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.nimbusds.jose.jwk.RSAKey;
 import org.springframework.stereotype.Service;
 

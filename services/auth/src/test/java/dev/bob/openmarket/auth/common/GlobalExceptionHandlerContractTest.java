@@ -6,8 +6,8 @@ import dev.bob.openmarket.auth.support.TestSecurityConfig;
 import dev.bob.openmarket.auth.token.TokenCookieService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -28,8 +28,8 @@ class GlobalExceptionHandlerContractTest {
 
     @Autowired MockMvc mvc;
 
-    @MockBean AdminService adminService;
-    @MockBean ClientIpResolver clientIpResolver;
+    @MockitoBean AdminService adminService;
+    @MockitoBean ClientIpResolver clientIpResolver;
 
     private static final String AUTH = "Authorization";
 

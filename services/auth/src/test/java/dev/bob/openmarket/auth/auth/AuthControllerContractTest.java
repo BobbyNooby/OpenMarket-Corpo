@@ -13,8 +13,8 @@ import dev.bob.openmarket.auth.user.dto.UserResponse;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -46,9 +46,9 @@ class AuthControllerContractTest {
 
     @Autowired MockMvc mvc;
 
-    @MockBean AuthService authService;
-    @MockBean UserService userService;
-    @MockBean ClientIpResolver clientIps; // IP metadata is not under contract here
+    @MockitoBean AuthService authService;
+    @MockitoBean UserService userService;
+    @MockitoBean ClientIpResolver clientIps; // IP metadata is not under contract here
 
     private static final String REGISTER_JSON =
         "{\"email\":\"garen@demaciabook.com\",\"password\":\"demaciaforever222\",\"name\":\"Garen Crownguard\"}";

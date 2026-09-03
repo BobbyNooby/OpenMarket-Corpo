@@ -1,6 +1,6 @@
 package dev.bob.openmarket.auth.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import dev.bob.openmarket.auth.common.ApiError;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;

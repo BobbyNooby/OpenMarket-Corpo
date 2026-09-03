@@ -8,8 +8,8 @@ import dev.bob.openmarket.auth.token.TokenCookieService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -34,8 +34,8 @@ class EmailFlowControllerContractTest {
 
     @Autowired MockMvc mvc;
 
-    @MockBean EmailFlowService emailFlows;
-    @MockBean ClientIpResolver clientIps; // IP metadata is not under contract here
+    @MockitoBean EmailFlowService emailFlows;
+    @MockitoBean ClientIpResolver clientIps; // IP metadata is not under contract here
 
     private static final String AUTH = "Authorization";
 

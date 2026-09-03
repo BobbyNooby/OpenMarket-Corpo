@@ -1,6 +1,6 @@
 package dev.bob.openmarket.auth.oauth;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.nimbusds.jose.jwk.KeyUse;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.jwk.RSAKey;

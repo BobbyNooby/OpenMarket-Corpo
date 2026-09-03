@@ -47,8 +47,23 @@ expect() { # expect <name> <python expr>  (asserts on last response body)
 API="http://localhost:8080"
 PG_CONTAINER=om-auth-flow-pg
 
-cleanup() { kill "${APP_PID:-}" "${GATEWAY_PID:-}" 2>/dev/null; docker rm -f "$PG_CONTAINER" >/dev/null 2>&1; pkill -f fake-discord.py 2>/dev/null; }
+cleanup() {
+  kill "${APP_PID:-}" "${GATEWAY_PID:-}" "${CATALOGUE_PID:-}" 2>/dev/null
+  # the app IS the jar JVM now (APP_PID), but be thorough: Boot shutdown can
+  # outlive a SIGTERM, and an orphaned :8080 makes the next run test a ghost
+  sleep 1
+  kill -9 "${APP_PID:-}" "${GATEWAY_PID:-}" "${CATALOGUE_PID:-}" 2>/dev/null
+  lsof -ti :8080 -ti :3000 -ti :8081 2>/dev/null | xargs kill -9 2>/dev/null
+  docker rm -f "$PG_CONTAINER" >/dev/null 2>&1
+  pkill -f fake-discord.py 2>/dev/null
+}
 trap cleanup EXIT
+
+# pre-flight: a stale app on these ports makes the wait-loop mistake a ghost
+# for this run's app — every assertion would then test yesterday's build
+if lsof -ti :8080 -ti :3000 -ti :5434 >/dev/null 2>&1; then
+  echo "ports 8080/3000/5434 busy — kill the stale processes first"; exit 1
+fi
 
 echo "── booting isolated stack ──────────────────────────────────"
 docker run -d --rm --name "$PG_CONTAINER" -e POSTGRES_USER=om -e POSTGRES_PASSWORD=devpassword123 \
@@ -66,10 +81,32 @@ export DISCORD_USERS_ME_URL=http://localhost:5399/api/users/@me
 # §10 greps token links from the dev mail log — full-body logging must stay on
 export AUTH_MAIL_LOG_FULL=true
 
-mvn -q spring-boot:run >"$TMP/app.log" 2>&1 &
+# Boot 4's spring-boot:run no longer propagates shell env (or its old
+# jvmArguments switch reliably) to the forked app JVM — the app would fall
+# back to application.yml defaults (compose's :5432 Postgres) and the whole
+# test would silently run against the WRONG database. Run the packaged jar
+# with explicit system properties instead: Spring reads -D system
+# properties first, so the app is pinned to THIS script's throwaway stack.
+mvn -q -DskipTests package
+java -DPOSTGRES_PORT=5434 \
+  -DDISCORD_CLIENT_ID=fake-client-id \
+  -DDISCORD_CLIENT_SECRET=fake-client-secret \
+  -DDISCORD_AUTHORIZE_URL=http://localhost:5399/oauth2/authorize \
+  -DDISCORD_TOKEN_URL=http://localhost:5399/api/oauth2/token \
+  -DDISCORD_USERS_ME_URL=http://localhost:5399/api/users/@me \
+  -Dauth.mail.log-full=true -Dlogging.level.org.hibernate.SQL=DEBUG -Dlogging.level.org.hibernate.orm.jdbc.bind=TRACE \
+  -jar target/auth-0.1.0.jar >"$TMP/app.log" 2>&1 &
 APP_PID=$!
 for i in $(seq 1 90); do sleep 2; curl -sf -m 2 "$API/health/live" >/dev/null 2>&1 && break; done
 step "app is up" 200 "$API/health/live"
+# ground truth: the app must be talking to THIS run's throwaway DB
+DBUSERS=$(docker exec "$PG_CONTAINER" psql -U om -d auth_db -t -c 'SELECT count(*) FROM auth.users;' 2>/dev/null | tr -d ' ')
+echo "  db sanity: users rows at boot = ${DBUSERS:-<unreachable>}"
+if [ "${DBUSERS:-1}" != "0" ]; then
+  echo "  FATAL: throwaway DB is not fresh — aborting instead of testing a ghost"
+  docker exec "$PG_CONTAINER" psql -U om -d auth_db -c 'SELECT email FROM auth.users;' 2>/dev/null | head -8
+  exit 1
+fi
 
 echo "── §1 infrastructure ───────────────────────────────────────"
 step "GET / service info" 200 "$API/"
@@ -317,10 +354,13 @@ step "unknown /api route → 404 (not the root info JSON)" 404 "$API_GW/api/v1/d
 expect "  …with the not_found code" "d['code']=='not_found'"
 docker exec $PG_CONTAINER psql -U om -d postgres -c 'CREATE DATABASE catalogue_db' >/dev/null 2>&1 || true
 (cd ../catalogue && dotnet publish -c Release -o "$TMP/catalogue" >/dev/null) || { echo "catalogue build failed"; exit 1; }
+# this script IS a dev environment — say so, or catalogue's Production
+# fail-fast (dev-default secrets) refuses to start
 DATABASE_URL="postgres://om:devpassword123@localhost:5434/catalogue_db" \
 DATABASE_SSLMODE=disable AUTH_URL=http://localhost:8080 \
 AUTH_GRPC_URL=http://localhost:9090 GRPC_INTERNAL_SECRET=dev-internal-secret \
-ASPNETCORE_URLS=http://localhost:8081 nohup "$TMP/catalogue/Catalogue" >"$TMP/catalogue.log" 2>&1 &
+ASPNETCORE_ENVIRONMENT=Development ASPNETCORE_URLS=http://localhost:8081 \
+nohup "$TMP/catalogue/Catalogue" >"$TMP/catalogue.log" 2>&1 &
 CATALOGUE_PID=$!
 for i in $(seq 1 20); do sleep 1; curl -sf -m 2 http://localhost:8081/health/ready >/dev/null 2>&1 && break; done
 step "catalogue browse through gateway → 200 (live upstream)" 200 "$API_GW/api/v1/catalogue/items"
@@ -347,19 +387,23 @@ step "banned user's pre-ban token through gateway → 401 at the edge" 401 -b "$
 
 echo "── §15 catalogue: items, listings, trades (via gateway) ────"
 step "catalogue health/ready → 200 (migrations + seed)" 200 http://localhost:8081/health/ready
-# lux self-deleted in §13 — bootstrap a fresh owner (live-owner count is 0)
-step "register flow-admin → 201 (owner bootstrap)" 201 -c "$TMP/cj-admin.txt" -X POST "$API_GW/api/v1/auth/register" \
+# lux self-deleted in §13 — BUT §14 already registered heimer through the
+# gateway, so the owner bootstrap went to HEIMER, not to anyone registering
+# below. Admin ops use heimer (owner); flow-admin is the plain user used for
+# the negative (403) case.
+step "register flow-admin → 201 (plain user; owner went to §14's heimer)" 201 -c "$TMP/cj-admin.txt" -X POST "$API_GW/api/v1/auth/register" \
   -H 'Content-Type: application/json' -d '{"email":"flow-admin@demaciabook.com","password":"FlowAdmin123","name":"Flow Admin"}'
-step "flow-admin creates currency → 201" 201 -b "$TMP/cj-admin.txt" -X POST "$API_GW/api/v1/catalogue/currencies" \
+step "heimer (owner) creates currency → 201" 201 -b "$TMP/cj-gw.txt" -X POST "$API_GW/api/v1/catalogue/currencies" \
   -H 'Content-Type: application/json' -d '{"name":"Flow Crowns"}'
-FLOW_COIN_ID=$(curl -s -b "$TMP/cj-admin.txt" "$API_GW/api/v1/catalogue/currencies" | python3 -c "import json,sys; print([c['id'] for c in json.load(sys.stdin)['currencies'] if c['slug']=='flow-crowns'][0])")
-step "flow-admin creates item → 201" 201 -b "$TMP/cj-admin.txt" -X POST "$API_GW/api/v1/catalogue/items" \
+FLOW_COIN_ID=$(curl -s -b "$TMP/cj-gw.txt" "$API_GW/api/v1/catalogue/currencies" | python3 -c "import json,sys; print([c['id'] for c in json.load(sys.stdin)['currencies'] if c['slug']=='flow-crowns'][0])")
+step "heimer (owner) creates item → 201" 201 -b "$TMP/cj-gw.txt" -X POST "$API_GW/api/v1/catalogue/items" \
   -H 'Content-Type: application/json' -d '{"name":"Flow Blade","categorySlug":"weapons"}'
-FLOW_ITEM_ID=$(curl -s -b "$TMP/cj-admin.txt" "$API_GW/api/v1/catalogue/items" | python3 -c "import json,sys; print([i['id'] for i in json.load(sys.stdin)['items'] if i['slug']=='flow-blade'][0])")
+FLOW_ITEM_ID=$(curl -s -b "$TMP/cj-gw.txt" "$API_GW/api/v1/catalogue/items" | python3 -c "import json,sys; print([i['id'] for i in json.load(sys.stdin)['items'] if i['slug']=='flow-blade'][0])")
 step "heimer posts buy listing (requests item, offers crowns) → 201" 201 -b "$TMP/cj-gw.txt" -X POST "$API_GW/api/v1/catalogue/listings" \
   -H 'Content-Type: application/json' \
   -d "{\"requestedItemId\":\"$FLOW_ITEM_ID\",\"amount\":2,\"orderType\":\"buy\",\"payingType\":\"each\",\"offered\":[{\"kind\":\"currency\",\"id\":\"$FLOW_COIN_ID\",\"amount\":5}]}"
-H_LISTING_ID=$(curl -s -b "$TMP/cj-gw.txt" "$API_GW/api/v1/catalogue/listings/me" | python3 -c "import json,sys; print(json.load(sys.stdin)['listings'][0]['id'])")
+step "heimer's listing list → 200" 200 -b "$TMP/cj-gw.txt" "$API_GW/api/v1/catalogue/listings/me/listings"
+H_LISTING_ID=$(curl -s -b "$TMP/cj-gw.txt" "$API_GW/api/v1/catalogue/listings/me/listings" | python3 -c "import json,sys; print(json.load(sys.stdin)['listings'][0]['id'])")
 step "browse listings by requested item → 200" 200 "$API_GW/api/v1/catalogue/listings?requestedItemId=$FLOW_ITEM_ID"
 step "heimer pauses → 200" 200 -b "$TMP/cj-gw.txt" -X POST "$API_GW/api/v1/catalogue/listings/$H_LISTING_ID/pause"
 step "heimer resumes → 200" 200 -b "$TMP/cj-gw.txt" -X POST "$API_GW/api/v1/catalogue/listings/$H_LISTING_ID/resume"
@@ -370,7 +414,7 @@ step "double accept → 409" 409 -b "$TMP/cj-gd.txt" -X POST "$API_GW/api/v1/cat
 step "heimer sees the trade → 200" 200 -b "$TMP/cj-gw.txt" "$API_GW/api/v1/catalogue/listings/me/trades"
 step "heimer watchlist add → 200" 200 -b "$TMP/cj-gw.txt" -X PUT "$API_GW/api/v1/catalogue/me/watchlist/$H_LISTING_ID"
 step "heimer watchlist remove → 200" 200 -b "$TMP/cj-gw.txt" -X DELETE "$API_GW/api/v1/catalogue/me/watchlist/$H_LISTING_ID"
-step "plain user cannot create items → 403" 403 -b "$TMP/cj-gw.txt" -X POST "$API_GW/api/v1/catalogue/items" \
+step "plain user (flow-admin) cannot create items → 403" 403 -b "$TMP/cj-admin.txt" -X POST "$API_GW/api/v1/catalogue/items" \
   -H 'Content-Type: application/json' -d '{"name":"Sneaky Item"}'
 kill "$CATALOGUE_PID" "$GATEWAY_PID" 2>/dev/null
 

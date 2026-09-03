@@ -1,6 +1,6 @@
 package dev.bob.openmarket.auth.oauth;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import dev.bob.openmarket.auth.config.DiscordProperties;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
