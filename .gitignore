@@ -71,3 +71,6 @@ services/auth/keys/
 CLAUDE.md
 AGENTS.md
 .zed/
+
+# stray go build artifacts
+services/messaging/messaging
