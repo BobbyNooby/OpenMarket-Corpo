@@ -8,8 +8,31 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="8.0" />
+    <!-- net10-aligned line: Npgsql.EFCore 10 pins EF Core 10 — bump together or not at all -->
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
+    <PackageReference Include="Google.Protobuf" Version="3.31.0" />
+    <PackageReference Include="Npgsql.DependencyInjection" Version="10.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
+    <PackageReference Include="Grpc.Net.Client" Version="2.71.0" />
+    <PackageReference Include="Grpc.Tools" Version="2.72.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- test project lives inside this directory — keep its sources out -->
+    <Compile Remove="Catalogue.Tests/**" />
+    <Content Remove="Catalogue.Tests/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- shared contract — single source of truth from contracts/ -->
+    <Protobuf Include="../../contracts/proto/openmarket/auth/v1/auth.proto"
+              GrpcServices="Client"
+              Link="Auth/auth.proto" />
   </ItemGroup>
 
 </Project>
