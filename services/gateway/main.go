@@ -29,6 +29,7 @@ import (
 	"github.com/openmarket-corpo/gateway/internal/httpx"
 	"github.com/openmarket-corpo/gateway/internal/upstream/auth"
 	"github.com/openmarket-corpo/gateway/internal/upstream/catalogue"
+	"github.com/openmarket-corpo/gateway/internal/upstream/messaging"
 	"github.com/openmarket-corpo/gateway/internal/upstream/stub"
 )
 
@@ -114,7 +115,7 @@ func newSystemProber(authHealth healthChecker, secret string) *systemProber {
 			"admin":     envOrDefault("ADMIN_URL", "http://localhost:8085"),
 		},
 		names:      []string{"auth", "catalogue", "messaging", "presence", "assets", "admin"},
-		deployed:   map[string]bool{"auth": true, "catalogue": true, "admin": true},
+		deployed:   map[string]bool{"auth": true, "catalogue": true, "messaging": true, "admin": true},
 		authHealth: authHealth,
 		secret:     secret,
 		client:     &http.Client{Timeout: 2 * time.Second},
@@ -297,8 +298,21 @@ func main() {
 	}
 	catalogue.Mount(mux, catalogueTarget, logger)
 
+	// ── messaging: third live upstream (chat REST + WS pushes) ──
+	messagingTarget, err := url.Parse(envOrDefault("MESSAGING_URL", "http://localhost:8082"))
+	if err != nil {
+		logger.Error("bad MESSAGING_URL", "err", err)
+		os.Exit(1)
+	}
+	messaging.Mount(mux, messaging.Config{
+		Target:            messagingTarget,
+		Introspector:      introspector,
+		IntrospectTimeout: 1 * time.Second,
+		Blocklist:         blocklisted,
+		Logger:            logger,
+	})
+
 	// ── pending services: mounted, answering 501 until deployed ──
-	mux.Handle("/api/v1/messaging/", stub.NotDeployed("messaging"))
 	mux.Handle("/api/v1/presence/", stub.NotDeployed("presence"))
 	mux.Handle("/api/v1/assets/", stub.NotDeployed("assets"))
 

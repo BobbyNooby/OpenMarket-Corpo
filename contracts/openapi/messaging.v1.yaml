@@ -1,0 +1,109 @@
+openapi: 3.1.0
+info:
+  title: OpenMarket Messaging API
+  version: "1.0"
+  description: |
+    Conversations and direct messages (v1 parity, ported to v2).
+    Served by the Go messaging service behind the gateway; every request
+    requires an authenticated user (RS256 JWT via Authorization header or
+    the om_access cookie — the same rule the gateway's edge check applies).
+
+    WebSocket pushes: GET /ws upgrades to a server→client push channel.
+    The client sends messages via REST; the socket only delivers events
+    of the shape {"type":"message.created","message":{...}} addressed to
+    the conversation's participants.
+paths:
+  /api/v1/messaging/conversations:
+    post:
+      summary: Create (or return the existing) 1:1 conversation with another user
+      description: Idempotent per participant-pair (+ optional listing).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [otherUserId]
+              properties:
+                otherUserId: { type: string, format: uuid }
+                listingId: { type: string, format: uuid, nullable: true }
+      responses:
+        "200": { description: Existing conversation returned (idempotent replay) }
+        "201": { description: Conversation created }
+        "400": { description: invalid_request — bad uuid, self-conversation }
+        "401": { description: unauthorized }
+    get:
+      summary: List my conversations, most recent activity first
+      responses:
+        "200": { description: Conversations with last message, unread count }
+        "401": { description: unauthorized }
+  /api/v1/messaging/conversations/unread-count:
+    get:
+      summary: Total unread messages across my conversations
+      responses:
+        "200": { description: '{"count": N}' }
+        "401": { description: unauthorized }
+  /api/v1/messaging/conversations/{id}/messages:
+    get:
+      summary: List messages in a conversation (participants only)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: before, in: query, schema: { type: string, format: uuid }, description: cursor — messages older than this id }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        "200": { description: Messages, oldest→newest }
+        "401": { description: unauthorized }
+        "404": { description: not_found — unknown or not a participant (masked) }
+    post:
+      summary: Send a message (participants only)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string, minLength: 1, maxLength: 4000 }
+      responses:
+        "201": { description: Message created; also pushed on /ws to participants }
+        "400": { description: invalid_request — empty/oversized content }
+        "404": { description: not_found — unknown or not a participant (masked) }
+  /api/v1/messaging/conversations/{id}/read:
+    post:
+      summary: Mark the conversation read up to now
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: marked }
+        "404": { description: not_found — unknown or not a participant (masked) }
+  /api/v1/messaging/messages/{id}:
+    delete:
+      summary: Soft-delete my own message
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: deleted }
+        "403": { description: forbidden — not the sender }
+        "404": { description: not_found }
+  /ws:
+    get:
+      summary: WebSocket push channel (server→client only)
+      description: Authenticated like REST; same-origin browser sends the om_access cookie.
+      responses:
+        "101": { description: switching protocols }
+        "401": { description: unauthorized }
+components:
+  schemas:
+    Message:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        conversationId: { type: string, format: uuid }
+        senderId: { type: string, format: uuid }
+        content: { type: string }
+        createdAt: { type: string, format: date-time }
+        editedAt: { type: string, format: date-time, nullable: true }
+        isDeleted: { type: boolean }

@@ -177,13 +177,14 @@ services:
       dockerfile: Dockerfile
     environment:
       DATABASE_URL: postgres://om:${POSTGRES_PASSWORD:-devpassword123}@postgres:5432/messaging_db
-      KAFKA_BROKERS: kafka:9092
-      REDIS_URL: redis:6379
+      # WS validation + identity: verifies caller JWTs against auth's JWKS
+      AUTH_URL: http://auth:8080
+      # the dev frontend's origins; prod passes its own list
+      WS_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
       OTLP_ENDPOINT: http://jaeger:4318
     depends_on:
       postgres: { condition: service_healthy }
-      kafka: { condition: service_healthy }
-      redis: { condition: service_healthy }
+      auth: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8082/health/ready"]
       interval: 10s
