@@ -6,6 +6,7 @@ The **messaging** service owns conversations and chat between OpenMarket users.
 - **Database:** PostgreSQL (`messaging_db`) — schema applied by the service's embedded migrations
 - **Contract:** [`contracts/openapi/messaging.v1.yaml`](../../contracts/openapi/messaging.v1.yaml)
 - **Tests:** [`docs/testing.md`](docs/testing.md) — 20 tests, three layers, and what's deliberately not tested
+- **Full docs:** [`docs/README.md`](docs/README.md) — architecture, security, testing
 
 ## Current state — LIVE (Phase 2, slice 1)
 

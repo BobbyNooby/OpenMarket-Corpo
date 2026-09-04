@@ -4,6 +4,8 @@ The **catalogue** service owns the marketplace catalog: items, currencies,
 categories, listings, offers, and trades.
 
 - **Stack:** C# / ASP.NET Core (.NET 10), port 8081
+- **Docs:** full documentation in [docs/](docs/) — start at
+  [docs/README.md](docs/README.md)
 - **Database:** PostgreSQL (`catalogue_db`), EF Core + Npgsql, migrations on
   startup under an advisory lock
 - **Identity:** JWTs minted by the auth service (RS256, JWKS fetched lazily,
